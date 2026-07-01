@@ -219,6 +219,17 @@ test('Replace mode replaces the real textarea, stashes the original, and shows t
     assert.strictEqual(doc.getElementById('alt_prompt_textbox').value, 'ORIGINAL', 'Restore returns the original prompt');
 });
 
+test('Replace mode preserves the TRUE original across a second enhance (Restore is not one-level)', () => {
+    const { win, doc } = boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
+    win.peAddPromptButtons();
+    win.peApplyEnhancement('ORIGINAL', 'ENHANCED1');
+    win.peApplyEnhancement('ENHANCED1', 'ENHANCED2');
+    assert.strictEqual(doc.getElementById('alt_prompt_textbox').value, 'ENHANCED2', 'second enhance replaces the box');
+    assert.strictEqual(win.PromptEnhance.lastOriginal, 'ORIGINAL', 'the earliest original must be preserved, not the intermediate');
+    doc.getElementById('pe_restore_btn').dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    assert.strictEqual(doc.getElementById('alt_prompt_textbox').value, 'ORIGINAL', 'Restore returns the TRUE original after multiple enhances');
+});
+
 // ---- settings.js: real panel mounts + shows; public API present; no bare global leakage ----
 test('Opening settings mounts a REAL panel into document.body and shows it', () => {
     const { win, doc } = boot({});

@@ -130,17 +130,17 @@ public class SessionSettings
         JToken timeoutSeconds = incoming["timeoutSeconds"];
         if (timeoutSeconds != null && timeoutSeconds.Type != JTokenType.Null)
         {
-            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1)
+            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1 || timeoutSeconds.Value<long>() > int.MaxValue)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Timeout (seconds) must be a whole number of at least 1.");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Timeout (seconds) must be a whole number between 1 and {int.MaxValue}.");
             }
         }
         JToken maxTokens = incoming["maxTokens"];
         if (maxTokens != null && maxTokens.Type != JTokenType.Null)
         {
-            if (maxTokens.Type != JTokenType.Integer || maxTokens.Value<long>() < 1)
+            if (maxTokens.Type != JTokenType.Integer || maxTokens.Value<long>() < 1 || maxTokens.Value<long>() > int.MaxValue)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Max tokens must be a whole number of at least 1.");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Max tokens must be a whole number between 1 and {int.MaxValue}.");
             }
         }
         JToken temperature = incoming["temperature"];

@@ -92,6 +92,31 @@ public class SessionSettingsTests
     }
 
     [Xunit.Fact]
+    public void ValidateSettings_RejectsTimeoutAboveInt32()
+    {
+        // Arrange — a stored value > int.MaxValue would throw OverflowException on Value<int?>() outside the try in
+        // the backend client (an unhandled 500), so the guard must reject it before it is ever persisted.
+        JObject input = Full();
+        input["timeoutSeconds"] = (long)int.MaxValue + 1;
+        // Act
+        JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
+        // Assert
+        AssertRejected(error);
+    }
+
+    [Xunit.Fact]
+    public void ValidateSettings_RejectsMaxTokensAboveInt32()
+    {
+        // Arrange
+        JObject input = Full();
+        input["maxTokens"] = (long)int.MaxValue + 1;
+        // Act
+        JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
+        // Assert
+        AssertRejected(error);
+    }
+
+    [Xunit.Fact]
     public void ValidateSettings_RejectsUnknownReplaceMode()
     {
         // Arrange

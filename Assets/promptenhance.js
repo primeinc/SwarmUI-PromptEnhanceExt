@@ -113,7 +113,9 @@ function peApplyEnhancement(original, enhanced) {
         return;
     }
     if (mode === 'replace_with_restore') {
-        PromptEnhance.lastOriginal = original;
+        if (PromptEnhance.lastOriginal === null) {
+            PromptEnhance.lastOriginal = original;
+        }
         peSetPrompt(enhanced);
         peShowRestore();
         return;
@@ -246,8 +248,11 @@ function peAddPromptButtons() {
     });
     preview.querySelector('#pe_preview_apply').addEventListener('click', () => {
         if (PromptEnhance.pending) {
-            // Applying from preview keeps a recovery path: stash the original and offer Restore.
-            PromptEnhance.lastOriginal = PromptEnhance.pending.original;
+            // Applying from preview keeps a recovery path: stash the earliest original (never overwrite it on a
+            // second enhance, so Restore always returns the true original, not an intermediate) and offer Restore.
+            if (PromptEnhance.lastOriginal === null) {
+                PromptEnhance.lastOriginal = PromptEnhance.pending.original;
+            }
             peSetPrompt(PromptEnhance.pending.enhanced);
             peShowRestore();
         }
