@@ -9,9 +9,16 @@ marked as inspection-only or still open.
 Last validated state: extension `Build succeeded — 0 Warning(s), 0 Error(s)`; C# test suite
 `Passed! Failed: 0, Passed: 60, Skipped: 0` (29 cases added for these findings on top of the prior 31-case suite;
 all test files are staged as new — HEAD has no committed tests), run via
-`dotnet test Tests/PromptEnhance.Tests.csproj -c Debug` against a real SwarmUI host build; **plus 7 frontend
-behavior tests** (`node Tests/frontend/promptenhance.test.js` → `PASS — 7/7`) covering the browser apply policy,
-loading-always-clears, and F3 image surfacing.
+`dotnet test Tests/PromptEnhance.Tests.csproj -c Debug` against a real SwarmUI host build; **plus 12 real-jsdom
+frontend tests** (`node Tests/frontend/promptenhance.test.js` → `PASS — 12/12`) covering button injection, a real
+dispatched click, the apply policy, loading-always-clears, and F3 image surfacing — proven non-hollow by a mutation
+test (breaking the rendered button id turns them RED, then restored). A full jit-grounded per-subsystem audit is in
+`docs/AUDIT.md`.
+
+> **Correction:** an earlier revision of this ledger claimed the frontend gap was closed by 7 Node-`vm` tests. Those
+> were stub-theater — a hand-built fake DOM whose `querySelector` fabricated stub nodes and never parsed `innerHTML`,
+> so a real markup regression could not turn them red. They are superseded by the real-jsdom suite above. See
+> `docs/AUDIT.md` §3.
 
 ---
 
@@ -65,7 +72,7 @@ Everything not serving that contract, reducing blast radius, or teaching the Swa
 | `Assets/promptenhance.js` | Generate-tab surface: Enhance button, reversible apply policy, image collection |
 | `Assets/settings.js` | Client config mirror + settings panel; load/save/reset; model fetch |
 | `Assets/promptenhance.css`, `Assets/settings.css` | Theme-variable-driven styling for the above |
-| `Tests/*` | 9 xUnit files (60 cases, C# surface) + `Tests/frontend/promptenhance.test.js` (7 Node `vm` tests, browser behavior, no npm dep) |
+| `Tests/*` | 9 xUnit files (60 cases, C# surface) + `Tests/frontend/promptenhance.test.js` (12 real-jsdom tests, browser behavior; jsdom dev-dep) |
 | `README.md`, `LICENSE`, `docs/GOVERNANCE.md` | Truthful docs, license + acknowledgment, this ledger |
 | `.gitignore` | Build-artifact ignore rules (keeps `bin/`, `obj/`, `vendor/` out of the tree) |
 
@@ -97,12 +104,13 @@ MagicPrompt tab (`Tabs/Text2Image/MagicPrompt.html`), and the old entrypoint (`M
 
 ### Honest coverage gaps (not covered by automated tests)
 
-1. **Frontend behavior — now covered.** `Tests/frontend/promptenhance.test.js` (7 tests via Node `vm` + stubs, no
-   npm dependency) enforces the reversible apply policy (preview does not mutate; append preserves the original;
-   replace stashes it for restore), the loading state always clearing on success and on failure, and F3's
-   browser-side image-collection surfacing (a failed image read surfaces an error and aborts — the request is
-   never sent text-only). What remains untested here is the full DOM lifecycle (button injection, panel wiring),
-   which needs a real jsdom/browser harness.
+1. **Frontend behavior — covered by a real DOM.** `Tests/frontend/promptenhance.test.js` (12 tests, real **jsdom**,
+   declared as a dev-dependency in `package.json`) loads the real `promptenhance.js`/`settings.js` into a real
+   document and asserts against parsed DOM: button injection into the real `.alt_prompt_region`, a real dispatched
+   `MouseEvent` click, the reversible apply policy against the real textarea, F3 image surfacing (real `FileReader` +
+   `Blob`), loading always clearing, the settings panel mounting, and no bare-global leakage. Proven non-hollow:
+   breaking the rendered button id turns the suite RED (10/12), restored → 12/12. What remains is a full
+   **live-SwarmUI** boot (buttons in the actual running Generate tab, live HTTP) — see `docs/AUDIT.md` §6.
 2. **Server-side wiring is inspection-only.** Only the *pure* helpers are unit-tested — `ValidateSettings`,
    `LooksLikeImageRejection`, `ParseMedia`, `NormalizeBaseUrl`, `BuildChatRequest`. The persistence entrypoints
    (`SavePromptEnhanceSettings` / `GetPromptEnhanceSettings` / `ResetPromptEnhanceSettings`) and both HTTP route
