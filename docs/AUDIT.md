@@ -103,19 +103,24 @@ Microsoft-doc archaeology was performed, per the audit's scope discipline.
 
 ## 6. Validation gates (observed) and remaining gaps
 
-**Passing gates (real command output, re-runnable):** the C# gates build against the real SwarmUI host vendored at
-`vendor/SwarmUI` (gitignored) with this repo linked in at `vendor/SwarmUI/src/Extensions/PromptEnhance`; run from that
-`Tests/` directory with `dotnet test`. Last reproduced 2026-07-01: `Passed! Failed: 0, Passed: 62, Skipped: 0, Total: 62`.
+**Passing gates (real command output, re-runnable):** reproduce the canonical way — clone this repo into a SwarmUI
+checkout at `SwarmUI/src/Extensions/PromptEnhance/` (the standard extension layout; see README → Installation), then run
+`dotnet test` from `Tests/`. The test project references the host `SwarmUI.csproj` / `SwarmUI.extension.props` as project
+references, so the extension compiles against the real SwarmUI host with **no copy step**. Last reproduced 2026-07-01:
+`Passed! Failed: 0, Passed: 73, Skipped: 0, Total: 73`.
 - Extension build: `Build succeeded` against the real SwarmUI host (`SwarmUI.dll` compiled as a project reference).
-- C# unit suite: `Passed! Failed: 0, Passed: 62, Skipped: 0` (`dotnet test`). Covers `NormalizeBaseUrl`, `ParseMedia`
+- C# suite: `Passed! Failed: 0, Passed: 73, Skipped: 0` (`dotnet test`). Covers `NormalizeBaseUrl`, `ParseMedia`
   (throw-on-drop), `ValidateSettings`, error taxonomy + `LooksLikeImageRejection`, `BuildChatRequest` wire shape,
-  client/server default parity, route `isUserUpdate` **and permission binding**, no-inheritance, and the
-  `CreateModelsResponse` lowercase-`id`/`name` wire shape (§6.1).
+  client/server default parity, route `isUserUpdate` **and permission binding**, no-inheritance, the
+  `CreateModelsResponse` lowercase-`id`/`name` wire shape (§6.1), and **11 real-HTTP transport integration tests**
+  (`BackendTransportTests`, driving `ExecuteListModels`/`ExecuteChat` against an in-process TCP mock OpenAI server):
+  404→model_missing, 500/refused→server_unavailable, 401→authentication, malformed body→invalid_response_shape,
+  image-blaming 400→unsupported_image, bare 400→http_error, real per-request timeout→timeout, plus both success paths.
 - Frontend real-DOM suite: `PASS — 12/12` (`node Tests/frontend/promptenhance.test.js`), **proven non-hollow by
   mutation** (broken button id → RED; restored → PASS). Covers button injection into the real region, a real dispatched
   click, reversible apply policy, F3 image surfacing (real `FileReader`), loading-always-clears, settings-panel mount,
   no-global-leak.
-- **Live SwarmUI end-to-end — OBSERVED, NOT IN-REPO REPRODUCIBLE.** A manual live boot was performed during development
+- **Live SwarmUI end-to-end — BLOCKED (observed, not in-repo reproducible).** A manual live boot was performed during development
   (`SwarmUI.exe --environment dev`); it loaded the extension (`[Init] PromptEnhance extension loaded.`) and, in the real
   Generate tab against a local mock OpenAI-compatible backend, the buttons injected, settings persisted across a restart,
   the model list populated from `GET {base}/v1/models`, and an Enhance click round-tripped `POST {base}/v1/chat/completions`
@@ -123,7 +128,7 @@ Microsoft-doc archaeology was performed, per the audit's scope discipline.
   (`git ls-files | rg -i 'playwright|\.spec\.'` = 0 hits), so this narrative is *not* re-runnable or verifiable from the
   tree — it is recorded as an observation, not a validation gate, per this report's observed≠target discipline. The one
   durable, committed product of that run is the model-list serialization fix and its pinning test (§6.1), which passes in
-  the reproducible 62/62 C# suite above.
+  the reproducible 73/73 C# suite above.
 
 ### 6.1 Bug found and fixed by the live run
 
@@ -150,14 +155,14 @@ For McMonkey to point to this as the canonical example, the observed state must 
 - [x] Single source of truth for the 8 config knobs; per-user, failure-aware persistence with a validation guard.
 - [x] Reversible prompt application; loading always clears; image failure classified and surfaced — each with a passing gate.
 - [x] No stub-theater tests; the frontend suite is real-DOM and mutation-proven.
-- [ ] **A committed, re-runnable live-SwarmUI end-to-end gate.** NOT met. A live run was *observed* manually (§6) and
-  produced the model-list fix (§6.1, now pinned by the reproducible 62/62 suite), but no Playwright spec/config/trace is
-  committed, so there is no in-repo reproducible live gate. Closing this requires committing the runner or a captured
-  trace/log.
+- [ ] **A committed, re-runnable live-SwarmUI end-to-end gate — BLOCKED.** A live run was *observed* manually (§6) and
+  produced the model-list fix (§6.1, now pinned by the reproducible 73/73 suite), but no Playwright spec/config/trace is
+  committed, so there is no in-repo reproducible live gate. The runtime claim is therefore explicitly marked BLOCKED, not
+  asserted as validated. Closing it requires committing the runner or a captured trace/log.
 
 ## Verdict
 
-**Observed:** canonical-shaped and evidence-validated at the **unit (62/62 C#, re-runnable against the vendored host) and
+**Observed:** canonical-shaped and evidence-validated at the **unit (73/73 C#, re-runnable via a standard SwarmUI host checkout) and
 real-DOM (12/12 jsdom)** boundaries. A live SwarmUI boot was *observed manually* and caught the model-list serialization
 bug now pinned in the reproducible C# suite (§6.1), but it is **not** committed as a re-runnable gate (§6, §7) — the
 live-runtime boundary is recorded as an observation, not validated evidence, and remains the one open exemplar item. No

@@ -7,16 +7,17 @@ retained upstream copyright in `LICENSE`. It records what was complained about, 
 change was *validated*. A claim is not "fixed" here until a named validation item passes, or the item is honestly
 marked as inspection-only or still open.
 
-Last validated state (reproduced 2026-07-01, re-runnable): C# test suite `Passed! Failed: 0, Passed: 62, Skipped: 0,
-Total: 62`, run via `dotnet test` against a real SwarmUI host build (`SwarmUI.dll` compiled as a project reference).
-The host is vendored, gitignored, at `vendor/SwarmUI`, with this repo linked in at
-`vendor/SwarmUI/src/Extensions/PromptEnhance`; run the suite from that `Tests/` directory. **Plus 12 real-jsdom
+Last validated state (reproduced 2026-07-01, re-runnable): C# test suite `Passed! Failed: 0, Passed: 73, Skipped: 0,
+Total: 73`, run via `dotnet test` against a real SwarmUI host build (`SwarmUI.dll` compiled as a project reference).
+Reproduce the canonical way — clone this repo into a SwarmUI checkout at `SwarmUI/src/Extensions/PromptEnhance/` (the
+standard extension layout; see README → Installation), then run `dotnet test` from `Tests/`; the extension compiles
+against the host as a project reference with **no copy step**. **Plus 12 real-jsdom
 frontend tests** (`node Tests/frontend/promptenhance.test.js` → `PASS — 12/12`) covering button injection, a real
 dispatched click, the apply policy, loading-always-clears, and F3 image surfacing — proven non-hollow by a mutation
 test (breaking the rendered button id turns them RED, then restored).
 
 A live-SwarmUI end-to-end run was performed manually during development and caught the model-list serialization bug now
-pinned by `ResponseShapeTests` in the reproducible 62/62 suite (`CreateModelsResponse` PascalCase → lowercase; see
+pinned by `ResponseShapeTests` in the reproducible 73/73 suite (`CreateModelsResponse` PascalCase → lowercase; see
 `docs/AUDIT.md` §6.1). **That live run is NOT committed as a re-runnable gate** — no Playwright spec/config/trace exists
 in the tree (`git ls-files | rg -i playwright` = 0 hits) — so it is recorded as an observation, not validated evidence,
 and remains the one open exemplar item (`docs/AUDIT.md` §6, §7). A full jit-grounded per-subsystem audit is in
