@@ -1,6 +1,6 @@
 # PromptEnhance — Evidence-Bound Repository Audit
 
-This is a bounded, evidence-generating audit of `SwarmUI-MagicPromptExtension` measured against the canonical SwarmUI
+This is a bounded, evidence-generating audit of `SwarmUI-PromptEnhanceExt` measured against the canonical SwarmUI
 extension reference architecture. It is deliberately scoped, cites `path:line` for every upstream claim, and keeps the
 **observed** repository state distinct from the **target** (canonical) state. Runtime behavior is treated as unsupported
 until a validation gate produces evidence; static code proves only implementation intent.
@@ -11,7 +11,7 @@ which files it read. Numbers below are from real command output, not memory.
 
 ## 1. Deterministic scope
 
-- **Audit target:** the extension repo `C:\Users\will\dev\SwarmUI-MagicPromptExtension` (26 tracked source/test/doc
+- **Audit target:** the extension repo `C:\Users\will\dev\SwarmUI-PromptEnhanceExt` (31 tracked source/test/doc
   files + dev-tooling manifest).
 - **External reference surfaces (the only ones consulted):**
   - SwarmUI upstream — `../refs/mcmonkeyprojects/SwarmUI`
@@ -103,8 +103,10 @@ Microsoft-doc archaeology was performed, per the audit's scope discipline.
 
 ## 6. Validation gates (observed) and remaining gaps
 
-**Passing gates (real command output):**
-- Extension build: `Build succeeded — 0 Warning(s), 0 Error(s)` against the real SwarmUI host.
+**Passing gates (real command output, re-runnable):** the C# gates build against the real SwarmUI host vendored at
+`vendor/SwarmUI` (gitignored) with this repo linked in at `vendor/SwarmUI/src/Extensions/PromptEnhance`; run from that
+`Tests/` directory with `dotnet test`. Last reproduced 2026-07-01: `Passed! Failed: 0, Passed: 62, Skipped: 0, Total: 62`.
+- Extension build: `Build succeeded` against the real SwarmUI host (`SwarmUI.dll` compiled as a project reference).
 - C# unit suite: `Passed! Failed: 0, Passed: 62, Skipped: 0` (`dotnet test`). Covers `NormalizeBaseUrl`, `ParseMedia`
   (throw-on-drop), `ValidateSettings`, error taxonomy + `LooksLikeImageRejection`, `BuildChatRequest` wire shape,
   client/server default parity, route `isUserUpdate` **and permission binding**, no-inheritance, and the
@@ -113,18 +115,15 @@ Microsoft-doc archaeology was performed, per the audit's scope discipline.
   mutation** (broken button id → RED; restored → PASS). Covers button injection into the real region, a real dispatched
   click, reversible apply policy, F3 image surfacing (real `FileReader`), loading-always-clears, settings-panel mount,
   no-global-leak.
-- **Live SwarmUI end-to-end (Playwright).** Booted the real host (`SwarmUI.exe --environment dev`); it compiled and
-  loaded the extension (`[Init] PromptEnhance extension loaded.`), then in the real Generate tab, driven by a real browser:
-  - `#pe_button_bar` was injected as a real child of the real `.alt_prompt_region`; `#pe_enhance_btn` is a real
-    `<button>` "✨ Enhance Prompt"; the ⚙️ settings button present.
-  - `baseUrl`/`model` saved through the real API and **persisted across a host restart** (per-user store — live proof of the
-    F10 per-user persistence).
-  - The model list populated from a real `GET {base}/v1/models`.
-  - A real click on Enhance ran `POST {base}/v1/chat/completions` and applied the result in **preview** mode: the preview
-    showed the enhanced text while the original prompt textarea was **left unchanged**; loading cleared; the Apply
-    (recovery) button appeared.
-  (Backend = a local mock OpenAI-compatible server; no image backend/model was installed — not needed for the extension's
-  owned contract.)
+- **Live SwarmUI end-to-end — OBSERVED, NOT IN-REPO REPRODUCIBLE.** A manual live boot was performed during development
+  (`SwarmUI.exe --environment dev`); it loaded the extension (`[Init] PromptEnhance extension loaded.`) and, in the real
+  Generate tab against a local mock OpenAI-compatible backend, the buttons injected, settings persisted across a restart,
+  the model list populated from `GET {base}/v1/models`, and an Enhance click round-tripped `POST {base}/v1/chat/completions`
+  with a reversible preview apply. **No Playwright spec, config, trace, screenshot, or log is committed to this repo**
+  (`git ls-files | rg -i 'playwright|\.spec\.'` = 0 hits), so this narrative is *not* re-runnable or verifiable from the
+  tree — it is recorded as an observation, not a validation gate, per this report's observed≠target discipline. The one
+  durable, committed product of that run is the model-list serialization fix and its pinning test (§6.1), which passes in
+  the reproducible 62/62 C# suite above.
 
 ### 6.1 Bug found and fixed by the live run
 
@@ -151,15 +150,16 @@ For McMonkey to point to this as the canonical example, the observed state must 
 - [x] Single source of truth for the 8 config knobs; per-user, failure-aware persistence with a validation guard.
 - [x] Reversible prompt application; loading always clears; image failure classified and surfaced — each with a passing gate.
 - [x] No stub-theater tests; the frontend suite is real-DOM and mutation-proven.
-- [x] **A recorded live-SwarmUI end-to-end run** (buttons appear in the running Generate tab; a real enhance round-trips).
-  Done (§6): the extension loaded in a live SwarmUI host, injected its buttons into the real Generate tab, and completed a
-  real `/v1/models` + `/v1/chat/completions` round-trip with reversible apply. The live run additionally caught and fixed a
-  real bug (§6.1).
+- [ ] **A committed, re-runnable live-SwarmUI end-to-end gate.** NOT met. A live run was *observed* manually (§6) and
+  produced the model-list fix (§6.1, now pinned by the reproducible 62/62 suite), but no Playwright spec/config/trace is
+  committed, so there is no in-repo reproducible live gate. Closing this requires committing the runner or a captured
+  trace/log.
 
 ## Verdict
 
-**Observed:** canonical-shaped and evidence-validated at the unit, real-DOM, **and live-runtime** boundaries. Every prior
-complaint is fixed with a passing gate. The extension was loaded into a live SwarmUI host and its full owned contract was
-exercised end-to-end (UI lifecycle → settings persistence across a restart → `/v1/models` → `/v1/chat/completions` →
-reversible preview apply); the live run also caught and fixed a real model-list serialization bug the isolated tests had
-missed. No scope drift, no snippet laundering, no runtime cosplay: every claim here is backed by real command/UI output.
+**Observed:** canonical-shaped and evidence-validated at the **unit (62/62 C#, re-runnable against the vendored host) and
+real-DOM (12/12 jsdom)** boundaries. A live SwarmUI boot was *observed manually* and caught the model-list serialization
+bug now pinned in the reproducible C# suite (§6.1), but it is **not** committed as a re-runnable gate (§6, §7) — the
+live-runtime boundary is recorded as an observation, not validated evidence, and remains the one open exemplar item. No
+scope drift and no snippet laundering: every *gated* claim here is backed by real, re-runnable command output; the live-run
+narrative is explicitly marked as non-reproducible-in-repo rather than presented as a passing gate.

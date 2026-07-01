@@ -14,7 +14,9 @@ namespace PromptEnhance.WebAPI;
 /// <summary>The single OpenAI-compatible backend client. Owns exactly two transport seams:
 /// <c>GET {base}/v1/models</c> and <c>POST {base}/v1/chat/completions</c>. Every failure is returned as a structured
 /// error payload (never thrown to the UI). The base URL is normalized so users may enter either a server root or a
-/// URL ending in <c>/v1</c>.</summary>
+/// URL ending in <c>/v1</c>. The route methods resolve settings from the <see cref="Session"/> and probe reachability;
+/// the transport itself lives in <see cref="ExecuteListModels"/> / <see cref="ExecuteChat"/>, which take explicit values
+/// (no Session) so the owned seams and their error taxonomy are integration-testable against a real HTTP server.</summary>
 public class BackendClient
 {
     // Infinite client timeout; each request supplies its own CancellationTokenSource so the settings timeout is authoritative.
@@ -117,7 +119,8 @@ public class BackendClient
         return (settings, normalizedBase);
     }
 
-    /// <summary>API route: list models from <c>GET {base}/v1/models</c>.</summary>
+    /// <summary>API route: list models from <c>GET {base}/v1/models</c>. Resolves settings + probes reachability, then
+    /// delegates the transport to <see cref="ExecuteListModels"/>.</summary>
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
@@ -131,6 +134,15 @@ public class BackendClient
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ServerUnavailable);
         }
         int timeoutSec = settings["timeoutSeconds"]?.Value<int?>() ?? 60;
+        return await ExecuteListModels(normalizedBase, timeoutSec);
+    }
+
+    /// <summary>Transport seam for <c>GET {normalizedBase}/v1/models</c>: performs the real HTTP request under a
+    /// per-request timeout and maps every outcome to a structured payload — success (parsed model list), non-success
+    /// HTTP (categorized), unparseable body (<see cref="PromptEnhanceErrorCategory.InvalidResponseShape"/>), timeout,
+    /// connection failure (<see cref="PromptEnhanceErrorCategory.ServerUnavailable"/>). Never throws to the caller.</summary>
+    public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec)
+    {
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(timeoutSec));
@@ -165,7 +177,8 @@ public class BackendClient
 
     /// <summary>API route: enhance a prompt via <c>POST {base}/v1/chat/completions</c>.
     /// Input: <c>{ "prompt": string, "media": [ { "type", "data", "mediaType" } ] (optional) }</c>.
-    /// The model, system prompt, temperature, max tokens, and timeout all come from settings (single source of truth).</summary>
+    /// The model, system prompt, temperature, max tokens, and timeout all come from settings (single source of truth).
+    /// Resolves settings + probes reachability, then delegates the transport to <see cref="ExecuteChat"/>.</summary>
     public static async Task<JObject> PromptEnhanceRun(JObject rawInput, Session session)
     {
         string userText = rawInput?["prompt"]?.ToString();
@@ -201,7 +214,16 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
         }
+        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec);
+    }
 
+    /// <summary>Transport seam for <c>POST {normalizedBase}/v1/chat/completions</c>: builds the OpenAI-shaped request,
+    /// performs the real HTTP request under a per-request timeout, and maps every outcome to a structured payload —
+    /// success (extracted content), non-success HTTP (categorized; an image-blaming 400 with media attached →
+    /// <see cref="PromptEnhanceErrorCategory.UnsupportedImage"/>), unparseable body
+    /// (<see cref="PromptEnhanceErrorCategory.InvalidResponseShape"/>), timeout, connection failure. Never throws.</summary>
+    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec)
+    {
         object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
         string json = JsonSerializer.Serialize(requestBody);
         try
@@ -217,7 +239,7 @@ public class BackendClient
             {
                 // A 400 with an image attached is "unsupported image" only when the backend error body actually blames
                 // the image; a bare 400 is far more often an ordinary bad request and must not be mislabeled.
-                PromptEnhanceErrorCategory category = media.Count > 0 && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
+                PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
                     ? PromptEnhanceErrorCategory.UnsupportedImage
                     : ErrorHandler.CategorizeHttpStatus(response.StatusCode);
                 return PromptEnhanceAPI.CreateErrorResponse(category, PromptEnhanceAPI.ExtractErrorMessage(body));

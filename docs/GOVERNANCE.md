@@ -1,21 +1,26 @@
 # PromptEnhance — Governance & Validation Ledger
 
-This document is the audit trail for turning `SwarmUI-MagicPromptExtension` (a fork of the general-purpose
-MagicPrompt LLM client) into **PromptEnhance**, a minimal canonical SwarmUI Generate-tab prompt-enhancement
-extension. It records what was complained about, the on-disk evidence, what changed, and — critically — how each
+This document is the audit trail for turning the upstream **MagicPrompt** extension (a general-purpose MagicPrompt LLM
+client by Hartsy) into **PromptEnhance**, a minimal canonical SwarmUI Generate-tab prompt-enhancement extension. This
+repo is `SwarmUI-PromptEnhanceExt` (31 tracked files); the derivation is preserved in commit `a7e4395` and in the
+retained upstream copyright in `LICENSE`. It records what was complained about, the on-disk evidence, what changed, and — critically — how each
 change was *validated*. A claim is not "fixed" here until a named validation item passes, or the item is honestly
 marked as inspection-only or still open.
 
-Last validated state: extension `Build succeeded — 0 Warning(s), 0 Error(s)`; C# test suite
-`Passed! Failed: 0, Passed: 62, Skipped: 0`, run via
-`dotnet test Tests/PromptEnhance.Tests.csproj -c Debug` against a real SwarmUI host build; **plus 12 real-jsdom
+Last validated state (reproduced 2026-07-01, re-runnable): C# test suite `Passed! Failed: 0, Passed: 62, Skipped: 0,
+Total: 62`, run via `dotnet test` against a real SwarmUI host build (`SwarmUI.dll` compiled as a project reference).
+The host is vendored, gitignored, at `vendor/SwarmUI`, with this repo linked in at
+`vendor/SwarmUI/src/Extensions/PromptEnhance`; run the suite from that `Tests/` directory. **Plus 12 real-jsdom
 frontend tests** (`node Tests/frontend/promptenhance.test.js` → `PASS — 12/12`) covering button injection, a real
 dispatched click, the apply policy, loading-always-clears, and F3 image surfacing — proven non-hollow by a mutation
-test (breaking the rendered button id turns them RED, then restored); **plus a live-SwarmUI end-to-end run** (Playwright)
-that loaded the extension into a real host, injected the buttons into the real Generate tab, and completed a real
-`/v1/models` + `/v1/chat/completions` round-trip with reversible preview apply — which also caught and fixed a real
-model-list serialization bug the isolated tests missed (`CreateModelsResponse` PascalCase → lowercase; see
-`docs/AUDIT.md` §6.1). A full jit-grounded per-subsystem audit + the runtime evidence are in `docs/AUDIT.md`.
+test (breaking the rendered button id turns them RED, then restored).
+
+A live-SwarmUI end-to-end run was performed manually during development and caught the model-list serialization bug now
+pinned by `ResponseShapeTests` in the reproducible 62/62 suite (`CreateModelsResponse` PascalCase → lowercase; see
+`docs/AUDIT.md` §6.1). **That live run is NOT committed as a re-runnable gate** — no Playwright spec/config/trace exists
+in the tree (`git ls-files | rg -i playwright` = 0 hits) — so it is recorded as an observation, not validated evidence,
+and remains the one open exemplar item (`docs/AUDIT.md` §6, §7). A full jit-grounded per-subsystem audit is in
+`docs/AUDIT.md`.
 
 > **Correction:** an earlier revision of this ledger claimed the frontend gap was closed by 7 Node-`vm` tests. Those
 > were stub-theater — a hand-built fake DOM whose `querySelector` fabricated stub nodes and never parsed `innerHTML`,
@@ -36,7 +41,7 @@ before being applied. Status legend: **FIXED+TEST** (code change proven by an au
 | F3 | Selected image silently downgraded to text-only on collection/parse failure — contradicts README "never silently dropped" | `promptenhance.js` `reader.onerror → resolve(null)` / `catch → null`; `BackendClient.ParseMedia` `continue` on blank data | Browser path rejects/throws (surfaced + request aborted); `ParseMedia` is `public` and throws `ArgumentException`, caught → `UnsupportedImage` payload | `ParseMediaTests` (3, server) + `Tests/frontend` F3 tests (browser) | FIXED+TEST |
 | F4 | `SavePromptEnhanceSettings` persisted any payload with zero validation → `timeoutSeconds:0` cancels every request, negative throws in CTS, non-numeric `temperature` throws on read | `SessionSettings.cs` merged known keys straight to store | Added pure `ValidateSettings(JObject)` guard, called before any storage I/O | `SessionSettingsTests` (10) | FIXED+TEST |
 | F5 | Auth error told the user to "Set the API key…" but the extension sends no key and has no such setting | `ErrorHandler.cs` Authentication remediation | Reworded to "sends no API key; point at an unauthenticated/local server" | `ErrorHandlerTests.Format_Authentication_DoesNotInstructSettingAnApiKey` | FIXED+TEST |
-| F6 | `RegisterAPICall` bool documented as "requires auth"; 3 of 5 values wrong for the real `isUserUpdate` convention | `PromptEnhanceAPI.Register()` | Doc corrected (bool = idle-timeout bookkeeping; auth = `PermInfo`); flipped ListModels→false, Save/Reset→true | `ApiRegistrationTests.Register_SetsIsUserUpdatePerConvention` | FIXED+TEST |
+| F6 | `RegisterAPICall` bool documented as "requires auth"; 3 of 5 values wrong for the real `isUserUpdate` convention | `PromptEnhanceAPI.Register()` | Doc corrected (bool = idle-timeout bookkeeping; auth = `PermInfo`); flipped ListModels→false, Save/Reset→true | `ApiRegistrationTests.Register_WiresIsUserUpdateAndPermissionPerRoute` | FIXED+TEST |
 | F8 | Client default `systemPrompt` was `''` while server default is a real instruction; a backend-down init + save persists empty over the real default | `settings.js` vs `SessionSettings.Defaults` | Client default set equal to the server default verbatim | `SettingsDefaultsParityTests.ClientSystemPromptDefault_MatchesServerDefaultVerbatim` | FIXED+TEST |
 | F9 | Any 400 with an image attached was labeled `UnsupportedImage`, even for context-length / bad-parameter errors | `BackendClient.cs` gated only on `media>0 && 400` | Added `ErrorHandler.LooksLikeImageRejection(body)`; a bare 400 now falls back to `HttpError` | `ErrorHandlerTests.LooksLikeImageRejection_*` (2 theories, 9 cases) | FIXED+TEST |
 | F10 | Settings stored under `Program.Sessions.GenericSharedUser` — **shared across all users**, not per-user | `SessionSettings.cs` `GenericSharedUser.SaveGenericData/GetGenericData` | Threaded `Session` into all three settings routes; persistence now uses `session.User.GetGenericData/SaveGenericData` (keyed by `UserID`, User.cs:113,154) so each user's config is isolated | `ApiRegistrationTests` (routes register with the new `Session` signatures) + grounding (User.cs:113,154) | FIXED |
