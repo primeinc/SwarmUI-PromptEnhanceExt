@@ -52,12 +52,24 @@ public class PromptEnhanceAPI
         ["response"] = response
     };
 
-    /// <summary>Success payload carrying the list of available models.</summary>
-    public static JObject CreateModelsResponse(List<ModelData> models) => new()
+    /// <summary>Success payload carrying the list of available models. Each model is emitted as <c>{ id, name }</c>
+    /// with lowercase keys — the shape <c>settings.js</c> reads (<c>m.id</c>/<c>m.name</c>) and the OpenAI convention.
+    /// This is built explicitly rather than via <see cref="JArray.FromObject"/>, because that path uses Newtonsoft,
+    /// which serializes <see cref="ModelData"/> by its C# property names (<c>Id</c>/<c>Name</c>) — ignoring the
+    /// System.Text.Json attributes — and the model dropdown would then silently stay empty.</summary>
+    public static JObject CreateModelsResponse(List<ModelData> models)
     {
-        ["success"] = true,
-        ["models"] = JArray.FromObject(models ?? [])
-    };
+        JArray array = [];
+        foreach (ModelData model in models ?? [])
+        {
+            array.Add(new JObject { ["id"] = model.Id, ["name"] = model.Name });
+        }
+        return new JObject
+        {
+            ["success"] = true,
+            ["models"] = array
+        };
+    }
 
     /// <summary>Success payload carrying the current settings object.</summary>
     public static JObject CreateSettingsResponse(JObject settings) => new()

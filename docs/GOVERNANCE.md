@@ -7,13 +7,15 @@ change was *validated*. A claim is not "fixed" here until a named validation ite
 marked as inspection-only or still open.
 
 Last validated state: extension `Build succeeded — 0 Warning(s), 0 Error(s)`; C# test suite
-`Passed! Failed: 0, Passed: 60, Skipped: 0` (29 cases added for these findings on top of the prior 31-case suite;
-all test files are staged as new — HEAD has no committed tests), run via
+`Passed! Failed: 0, Passed: 62, Skipped: 0`, run via
 `dotnet test Tests/PromptEnhance.Tests.csproj -c Debug` against a real SwarmUI host build; **plus 12 real-jsdom
 frontend tests** (`node Tests/frontend/promptenhance.test.js` → `PASS — 12/12`) covering button injection, a real
 dispatched click, the apply policy, loading-always-clears, and F3 image surfacing — proven non-hollow by a mutation
-test (breaking the rendered button id turns them RED, then restored). A full jit-grounded per-subsystem audit is in
-`docs/AUDIT.md`.
+test (breaking the rendered button id turns them RED, then restored); **plus a live-SwarmUI end-to-end run** (Playwright)
+that loaded the extension into a real host, injected the buttons into the real Generate tab, and completed a real
+`/v1/models` + `/v1/chat/completions` round-trip with reversible preview apply — which also caught and fixed a real
+model-list serialization bug the isolated tests missed (`CreateModelsResponse` PascalCase → lowercase; see
+`docs/AUDIT.md` §6.1). A full jit-grounded per-subsystem audit + the runtime evidence are in `docs/AUDIT.md`.
 
 > **Correction:** an earlier revision of this ledger claimed the frontend gap was closed by 7 Node-`vm` tests. Those
 > were stub-theater — a hand-built fake DOM whose `querySelector` fabricated stub nodes and never parsed `innerHTML`,

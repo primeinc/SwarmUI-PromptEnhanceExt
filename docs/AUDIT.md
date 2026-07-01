@@ -105,22 +105,42 @@ Microsoft-doc archaeology was performed, per the audit's scope discipline.
 
 **Passing gates (real command output):**
 - Extension build: `Build succeeded — 0 Warning(s), 0 Error(s)` against the real SwarmUI host.
-- C# unit suite: `Passed! Failed: 0, Passed: 60, Skipped: 0` (`dotnet test`). Covers `NormalizeBaseUrl`, `ParseMedia`
+- C# unit suite: `Passed! Failed: 0, Passed: 62, Skipped: 0` (`dotnet test`). Covers `NormalizeBaseUrl`, `ParseMedia`
   (throw-on-drop), `ValidateSettings`, error taxonomy + `LooksLikeImageRejection`, `BuildChatRequest` wire shape,
-  client/server default parity, route `isUserUpdate` **and permission binding**, no-inheritance.
+  client/server default parity, route `isUserUpdate` **and permission binding**, no-inheritance, and the
+  `CreateModelsResponse` lowercase-`id`/`name` wire shape (§6.1).
 - Frontend real-DOM suite: `PASS — 12/12` (`node Tests/frontend/promptenhance.test.js`), **proven non-hollow by
   mutation** (broken button id → RED; restored → PASS). Covers button injection into the real region, a real dispatched
   click, reversible apply policy, F3 image surfacing (real `FileReader`), loading-always-clears, settings-panel mount,
   no-global-leak.
+- **Live SwarmUI end-to-end (Playwright).** Booted the real host (`SwarmUI.exe --environment dev`); it compiled and
+  loaded the extension (`[Init] PromptEnhance extension loaded.`), then in the real Generate tab, driven by a real browser:
+  - `#pe_button_bar` was injected as a real child of the real `.alt_prompt_region`; `#pe_enhance_btn` is a real
+    `<button>` "✨ Enhance Prompt"; the ⚙️ settings button present.
+  - `baseUrl`/`model` saved through the real API and **persisted across a host restart** (per-user store — live proof of the
+    F10 per-user persistence).
+  - The model list populated from a real `GET {base}/v1/models`.
+  - A real click on Enhance ran `POST {base}/v1/chat/completions` and applied the result in **preview** mode: the preview
+    showed the enhanced text while the original prompt textarea was **left unchanged**; loading cleared; the Apply
+    (recovery) button appeared.
+  (Backend = a local mock OpenAI-compatible server; no image backend/model was installed — not needed for the extension's
+  owned contract.)
 
-**Remaining gaps (observed, not faked):**
-1. **No live SwarmUI boot.** The extension has never run inside a live SwarmUI process — no live Generate-tab render, no
-   live HTTP round-trip to a real OpenAI-compatible backend. The seams are validated in isolation (unit + real DOM), not
-   end-to-end. This is the single unmet acceptance gate.
-2. **C# lifecycle / asset registration** (`OnPreInit`/`OnInit` populating `ScriptFiles`/`StyleSheetFiles`) is verified by
-   inspection against `Extension.cs`, not by a unit test.
-3. **Per-user DB round-trip** (`Save`→`Get` through a real `Session.User`) is grounded against `User.cs`, not host-booted.
-4. **Minor coverage:** `HttpStatusCode.BadGateway` mapping and several `ErrorHandler.Format` category messages are not
+### 6.1 Bug found and fixed by the live run
+
+The live boot exposed a real defect the unit + real-DOM suites had missed: `CreateModelsResponse` built the model list
+with `JArray.FromObject(models)`, which serializes `ModelData` via **Newtonsoft** using its C# property names
+(`Id`/`Name`) and ignores the `System.Text.Json` `[JsonPropertyName]` attributes. The frontend reads `m.id`/`m.name`
+(lowercase), so **the model dropdown silently stayed empty for every user**. Fixed by emitting `{ id, name }` explicitly
+(`PromptEnhanceAPI.cs`) and pinned by `ResponseShapeTests.CreateModelsResponse_EmitsLowercaseIdAndName` (asserts the
+lowercase keys and the absence of the PascalCase ones). Confirmed in the live UI: after the fix the dropdown populated
+with `mock-enhancer`. This is the audit's central lesson — runtime validation catches integration defects that
+seam-isolated tests cannot.
+
+**Remaining minor gaps (observed, not faked):**
+1. **C# lifecycle / asset registration** (`OnPreInit`/`OnInit`) has no isolated unit test, but is now exercised at runtime
+   (the live boot logged the extension load and served the assets — the buttons appeared).
+2. **Minor coverage:** `HttpStatusCode.BadGateway` mapping and several `ErrorHandler.Format` category messages are not
    directly asserted.
 
 ## 7. Exemplar acceptance bar
@@ -131,13 +151,15 @@ For McMonkey to point to this as the canonical example, the observed state must 
 - [x] Single source of truth for the 8 config knobs; per-user, failure-aware persistence with a validation guard.
 - [x] Reversible prompt application; loading always clears; image failure classified and surfaced — each with a passing gate.
 - [x] No stub-theater tests; the frontend suite is real-DOM and mutation-proven.
-- [ ] **A recorded live-SwarmUI end-to-end run** (buttons appear in the running Generate tab; a real enhance round-trips).
-  This is the one gate not met in this environment and is the honest boundary between "canonical-shaped + unit/real-DOM
-  validated" and "runtime-proven."
+- [x] **A recorded live-SwarmUI end-to-end run** (buttons appear in the running Generate tab; a real enhance round-trips).
+  Done (§6): the extension loaded in a live SwarmUI host, injected its buttons into the real Generate tab, and completed a
+  real `/v1/models` + `/v1/chat/completions` round-trip with reversible apply. The live run additionally caught and fixed a
+  real bug (§6.1).
 
 ## Verdict
 
-**Observed:** canonical-shaped and evidence-validated at the unit + real-DOM boundary; every prior complaint is either
-fixed with a passing gate or documented as an open runtime gap. **Target not yet fully met** on exactly one axis — a live
-end-to-end SwarmUI boot — which is recorded here rather than claimed. No scope drift, no snippet laundering, no runtime
-cosplay: claims in this report do not outpace the read ledger.
+**Observed:** canonical-shaped and evidence-validated at the unit, real-DOM, **and live-runtime** boundaries. Every prior
+complaint is fixed with a passing gate. The extension was loaded into a live SwarmUI host and its full owned contract was
+exercised end-to-end (UI lifecycle → settings persistence across a restart → `/v1/models` → `/v1/chat/completions` →
+reversible preview apply); the live run also caught and fixed a real model-list serialization bug the isolated tests had
+missed. No scope drift, no snippet laundering, no runtime cosplay: every claim here is backed by real command/UI output.
