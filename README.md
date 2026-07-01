@@ -67,7 +67,7 @@ The enhanced text is never written over your prompt without a recovery path:
 
 ## Error categories
 
-Failures are classified and surfaced clearly rather than as raw stack traces: server unavailable, timeout, invalid base URL, model missing, unsupported image input, invalid response shape, and HTTP errors (with a response-body excerpt).
+Failures are classified and surfaced clearly rather than as raw stack traces: server unavailable, timeout, invalid base URL, model missing, unsupported image input, invalid response shape, authentication (the backend demanded credentials this extension does not send — point it at an unauthenticated/local server), and HTTP errors (with a response-body excerpt).
 
 ## Known working OpenAI-compatible backends
 
