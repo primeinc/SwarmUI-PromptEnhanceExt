@@ -1,273 +1,65 @@
-using SixLabors.ImageSharp.Processing;
-using SwarmUI.Utils;
-using SwarmUI.Media;
-using Image = SwarmUI.Utils.Image;
-using ISImage = SixLabors.ImageSharp.Image;
-using ISImage32 = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>;
-using ISImageFrame32 = SixLabors.ImageSharp.ImageFrame<SixLabors.ImageSharp.PixelFormats.Rgba32>;
+namespace PromptEnhance;
 
-namespace Hartsy.Extensions.MagicPromptExtension;
-
+/// <summary>Builds request bodies for the single OpenAI-compatible chat-completions backend.
+/// Pure builder — no I/O, no image processing, no logging — so it is trivial to read and reason about.
+/// The shape follows the canonical OpenAI schema (openai-openapi/openapi.yaml,
+/// ChatCompletionRequestUserMessage / ...MessageContentPartImage / ...MessageContentPartText):
+///   { model, messages: [ {role:"system", content}, {role:"user", content} ], temperature, max_tokens }
+/// where a user message's content is a plain string for text-only, or an array of
+///   { type:"text", text } and { type:"image_url", image_url:{ url } } parts when an image is attached.</summary>
 public static class BackendSchema
 {
-    public enum MessageType
-    {
-        Text,
-        Vision
-    }
-
-    public class MessageContent
-    {
-        public string Text { get; set; }
-        public string Instructions { get; set; }
-        public List<MediaContent> Media { get; set; }
-        public int? KeepAlive { get; set; }
-    }
-
+    /// <summary>A single image to attach to an enhance request.</summary>
     public class MediaContent
     {
-        public string Type { get; set; }  // "base64" or "url"
+        /// <summary>"base64" for inline data (sent as a data URI), or "url" for a direct image link.</summary>
+        public string Type { get; set; }
+        /// <summary>Base64 payload (no data-URI prefix) when <see cref="Type"/> is "base64", or the URL when "url".</summary>
         public string Data { get; set; }
-        public string MediaType { get; set; }  // "image/jpeg", "image/png", etc.
+        /// <summary>Source MIME type, e.g. "image/png", used to build the data URI. Defaults to image/jpeg when blank.</summary>
+        public string MediaType { get; set; }
     }
 
-    /// <summary>Get the schema type for the backend.</summary>
-    /// <param name="type">Backend type (ollama, openai, anthropic, etc.)</param>
-    /// <param name="content">Message content including text and media</param>
-    /// <param name="model">Model name to use</param>
-    /// <param name="messageType">Type of message (Text or Vision)</param>
-    /// <returns>Returns an object with the schema type for the backend.</returns>
-    public static object GetSchemaType(string type, MessageContent content, string model, MessageType messageType = MessageType.Text, long seed = -1)
-    {
-        if (content == null || string.IsNullOrEmpty(model))
-        {
-            throw new ArgumentException("Content or model cannot be null or empty.");
-        }
-        type = type.ToLower();
-        _ = content.KeepAlive;
-        return type switch
-        {
-            "ollama" => OllamaRequestBody(content, model, messageType, seed),
-            "grok" => OpenAICompatibleRequestBody(content, model, messageType, preferPngForBase64: true, seed),
-            "openai" or "openaiapi" or "openrouter" => OpenAICompatibleRequestBody(content, model, messageType, preferPngForBase64: false, seed),
-            "anthropic" => AnthropicRequestBody(content, model, messageType),
-            _ => throw new ArgumentException($"Unsupported backend type: {type}")
-        };
-    }
-
-    /// <summary>Compresses image data to optimize for LLM vision models</summary>
-    /// <param name="media">The media content containing image data</param>
-    /// <param name="targetFormat">The target format ("PNG" or "WEBP")</param>
-    /// <returns>Compressed base64 image data without the data URL prefix</returns>
-    public static string CompressImageForVision(MediaContent media, string targetFormat = "WEBP")
-    {
-        if (media.Type != "base64")
-        {
-            return media.Data;
-        }
-        try
-        {
-            ImageFile image = ImageFile.FromDataString($"data:{media.MediaType};base64,{media.Data}");
-            // Skip compression for videos etc..
-            if (image.Type.MetaType != MediaMetaType.Image)
-            {
-                return media.Data;
-            }
-            ISImage img = image.ToIS;
-            int maxDimension = 256; // TODO: This needs to be tested and adjusted
-            if (img.Width > maxDimension || img.Height > maxDimension)
-            {
-                float scaleFactor = maxDimension / (float)Math.Max(img.Width, img.Height);
-                int newWidth = (int)(img.Width * scaleFactor);
-                int newHeight = (int)(img.Height * scaleFactor);
-                img.Mutate(i => i.Resize(newWidth, newHeight));
-            }
-            // Set compression quality based on format TODO: This needs to be tested and adjusted
-            int quality = targetFormat == "PNG" ? 60 : 40;
-            ImageFile tempImage = new Image(ImageFile.ISImgToPngBytes(img), image.Type);
-            ImageFile compressedImage = tempImage.ConvertTo(targetFormat, quality: quality);
-            // Return just the base64 data (without the data:image/webp;base64, prefix)
-            return compressedImage.AsBase64;
-        }
-        catch (Exception ex)
-        {
-            Logs.Error($"Failed to compress image: {ex.Message}");
-            return media.Data;
-        }
-    }
-
-    /// <summary>Generates a request body for Ollama backend.</summary>
-    private static object OllamaRequestBody(MessageContent content, string model, MessageType messageType, long seed = -1)
+    /// <summary>Builds the OpenAI-compatible chat-completions request body.</summary>
+    /// <param name="model">Model id to send.</param>
+    /// <param name="systemPrompt">Optional system message (the enhancement instruction). Omitted when blank.</param>
+    /// <param name="userText">The user prompt text to enhance.</param>
+    /// <param name="media">Optional images to attach as multimodal content. When non-empty the user message
+    /// becomes a content array; otherwise it is a plain string.</param>
+    /// <param name="temperature">Sampling temperature from settings.</param>
+    /// <param name="maxTokens">Max response tokens from settings.</param>
+    public static object BuildChatRequest(string model, string systemPrompt, string userText, List<MediaContent> media, double temperature, int maxTokens)
     {
         List<object> messages = [];
-        if (!string.IsNullOrEmpty(content.Instructions))
+        if (!string.IsNullOrWhiteSpace(systemPrompt))
         {
-            messages.Add(new { role = "system", content = content.Instructions });
+            messages.Add(new { role = "system", content = systemPrompt });
         }
-
-        object options = seed == -1
-            ? new { temperature = 1.0, top_p = 0.9 }
-            : new { temperature = 1.0, top_p = 0.9, seed };
-
-        if (messageType == MessageType.Vision && content.Media?.Any() == true)
+        bool hasImages = media is { Count: > 0 };
+        if (hasImages)
         {
-            messages.Add(new
+            List<object> parts = [];
+            foreach (MediaContent m in media)
             {
-                role = "user",
-                content = content.Text,
-                images = content.Media.Select(m => CompressImageForVision(m, "JPG")).ToArray()
-            });
-
-            return new
-            {
-                model,
-                messages = messages.ToArray(),
-                stream = false,
-                keep_alive = content.KeepAlive,
-                options
-            };
+                string url = m.Type == "base64"
+                    ? $"data:{(string.IsNullOrWhiteSpace(m.MediaType) ? "image/jpeg" : m.MediaType)};base64,{m.Data}"
+                    : m.Data;
+                parts.Add(new { type = "image_url", image_url = new { url } });
+            }
+            parts.Add(new { type = "text", text = userText });
+            messages.Add(new { role = "user", content = parts });
         }
-        messages.Add(new { role = "user", content = content.Text });
+        else
+        {
+            messages.Add(new { role = "user", content = userText });
+        }
         return new
         {
             model,
             messages = messages.ToArray(),
-            stream = false,
-            keep_alive = content.KeepAlive,
-            options
-        };
-    }
-
-    /// <summary>Generates a request body for OpenAI and compatible backends.</summary>
-    private static object OpenAICompatibleRequestBody(MessageContent content, string model, MessageType messageType, bool preferPngForBase64, long seed = -1)
-    {
-        List<object> messages = [];
-        // Add system message if instructions exist
-        if (!string.IsNullOrEmpty(content.Instructions))
-        {
-            messages.Add(new { role = "system", content = content.Instructions });
-        }
-        if (messageType == MessageType.Vision && content.Media?.Any() == true)
-        {
-            List<object> contentList = [];
-            foreach (MediaContent media in content.Media)
-            {
-                string imageData = CompressImageForVision(media, preferPngForBase64 ? "PNG" : "WEBP");
-                contentList.Add(new
-                {
-                    type = "image_url",
-                    image_url = media.Type == "base64"
-                        ? new { url = preferPngForBase64 ? $"data:image/png;base64,{imageData}" : $"data:image/webp;base64,{imageData}" }
-                        : new { url = media.Data }
-                });
-            }
-            contentList.Add(new
-            {
-                type = "text",
-                text = content.Text
-            });
-            messages.Add(new
-            {
-                role = "user",
-                content = contentList
-            });
-
-            if (seed != -1)
-            {
-                return new
-                {
-                    model,
-                    messages = messages.ToArray(),
-                    max_tokens = 1000,
-                    temperature = 1.0,
-                    stream = false,
-                    seed
-                };
-            }
-
-            return new
-            {
-                model,
-                messages = messages.ToArray(),
-                max_tokens = 1000,
-                temperature = 1.0,
-                stream = false
-            };
-        }
-        messages.Add(new { role = "user", content = content.Text });
-
-        if (seed != -1)
-        {
-            return new
-            {
-                model,
-                messages = messages.ToArray(),
-                max_tokens = 1000,
-                temperature = 1.0,
-                stream = false,
-                seed
-            };
-        }
-
-        return new
-        {
-            model,
-            messages = messages.ToArray(),
-            temperature = 1.0,
-            max_tokens = 1000,
-            top_p = 0.9,
+            temperature,
+            max_tokens = maxTokens,
             stream = false
-        };
-    }
-
-    /// <summary>Generates a request body for the Anthropic (Claude) API.</summary>
-    private static object AnthropicRequestBody(MessageContent content, string model, MessageType messageType)
-    {
-        List<object> messages = [];
-        if (messageType == MessageType.Vision && content.Media?.Any() == true)
-        {
-            List<object> messageContent = [];
-            foreach (MediaContent media in content.Media)
-            {
-                // Compress image and convert to PNG. Anthropic only accepts PNG.
-                string imageData = CompressImageForVision(media, "PNG");
-                string mediaType = "image/png";
-                messageContent.Add(new
-                {
-                    type = "image",
-                    source = new
-                    {
-                        type = "base64",
-                        media_type = mediaType,
-                        data = imageData
-                    }
-                });
-            }
-            messageContent.Add(new
-            {
-                type = "text",
-                text = content.Text
-            });
-            messages.Add(new
-            {
-                role = "user",
-                content = messageContent.ToArray()
-            });
-            return new
-            {
-                model,
-                messages = messages.ToArray(),
-                system = content.Instructions,
-                max_tokens = 1024
-            };
-        }
-        messages.Add(new { role = "user", content = content.Text });
-        return new
-        {
-            model,
-            messages = messages.ToArray(),
-            system = content.Instructions,
-            max_tokens = 1024
         };
     }
 }

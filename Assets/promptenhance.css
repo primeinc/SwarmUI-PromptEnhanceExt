@@ -1,0 +1,143 @@
+/* PromptEnhance — Generate-tab button bar, loading, preview, and restore.
+   Colors come from SwarmUI theme variables so the UI follows the active theme (extension standard #7). */
+
+.promptenhance.pe-button-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.35rem 0;
+}
+
+.pe-enhance-btn {
+    padding: 0.25rem 0.8rem;
+    background-color: var(--emphasis-soft);
+    color: var(--emphasis-text);
+    border: 1px solid var(--button-border);
+    border-radius: 0.6rem;
+    font-weight: 600;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+.pe-enhance-btn:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--emphasis-soft) 70%, var(--emphasis));
+}
+
+.pe-enhance-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.pe-settings-button {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 1em;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 0.1rem 0.3rem;
+    transition: opacity 0.2s;
+}
+
+.pe-settings-button:hover {
+    opacity: 1;
+}
+
+.pe-restore-btn {
+    padding: 0.2rem 0.6rem;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    font-size: 0.8em;
+    cursor: pointer;
+    opacity: 0.85;
+}
+
+.pe-restore-btn:hover {
+    opacity: 1;
+    background-color: var(--background-soft);
+}
+
+/* Loading dots */
+.pe-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 1rem;
+}
+
+.pe-loading span {
+    width: 6px;
+    height: 6px;
+    background: var(--emphasis);
+    border-radius: 50%;
+    animation: peBounce 1.4s infinite ease-in-out both;
+}
+
+.pe-loading span:nth-child(1) { animation-delay: -0.32s; }
+.pe-loading span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes peBounce {
+    0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+/* Preview box (preview apply-mode) */
+.promptenhance.pe-preview {
+    margin: 0.35rem 0;
+    padding: 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--background-soft);
+    color: var(--text);
+}
+
+.pe-preview-label {
+    font-size: 0.8em;
+    opacity: 0.8;
+    margin-bottom: 0.4rem;
+}
+
+.pe-preview-text {
+    white-space: pre-wrap;
+    font-size: 0.9em;
+    max-height: 12rem;
+    overflow-y: auto;
+    padding: 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--background);
+}
+
+.pe-preview-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.pe-preview-apply,
+.pe-preview-cancel {
+    padding: 0.2rem 0.8rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--button-border);
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.pe-preview-apply {
+    background-color: var(--emphasis-soft);
+    color: var(--emphasis-text);
+    font-weight: 600;
+}
+
+.pe-preview-cancel {
+    background: transparent;
+    color: var(--text);
+}
+
+.pe-preview-cancel:hover {
+    background-color: var(--background);
+}

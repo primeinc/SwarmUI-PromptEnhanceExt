@@ -1,34 +1,103 @@
-﻿using Newtonsoft.Json;
 using System.Text.Json.Serialization;
 
-namespace Hartsy.Extensions.MagicPromptExtension.WebAPI.Models;
+namespace PromptEnhance.WebAPI.Models;
 
-///<summary>Represents the structure of Ollama's configuration (no BaseUrl or ApiKey).</summary>
-public class Backend
+// DTOs for the single OpenAI-compatible backend this extension owns.
+// Wire shapes follow the canonical OpenAI schema (openai-openapi/openapi.yaml):
+//   GET  {base}/v1/models          -> ListModelsResponse
+//   POST {base}/v1/chat/completions -> CreateChatCompletionResponse
+// Request bodies are built as plain objects in BackendSchema and serialized with System.Text.Json.
+// The SwarmUI API boundary itself speaks Newtonsoft JObject; these DTOs are only for the HTTP wire.
+
+/// <summary>A model entry surfaced to the UI dropdown. <see cref="Id"/> is the value sent back as the chat model.</summary>
+public class ModelData
 {
-    public Dictionary<string, string> Endpoints { get; set; }
+    [JsonPropertyName("id")]
+    public string Id { get; set; }
+
+    /// <summary>Human-friendly label. Defaults to <see cref="Id"/> when the server provides nothing better.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; }
 }
 
-///<summary>Represents the structure for openaiapi which requires only an ApiKey (optional).</summary>
-public class OpenAIAPIBackend : Backend
+/// <summary>Response of <c>GET {base}/v1/models</c> — <c>{ "object": "list", "data": [ { "id": ... } ] }</c>.</summary>
+public class ModelsListResponse
 {
-    public string BaseUrl { get; set; }
-    public string ApiKey { get; set; }
+    [JsonPropertyName("object")]
+    public string Object { get; set; }
+
+    [JsonPropertyName("data")]
+    public List<ModelEntry> Data { get; set; }
 }
 
-/// <summary>The message content within a response, including the content and the role.</summary>
-public class Message
+/// <summary>A single entry in the <c>/v1/models</c> <c>data</c> array.</summary>
+public class ModelEntry
 {
-    [JsonProperty("content")]
-    public string Content { get; set; }
+    [JsonPropertyName("id")]
+    public string Id { get; set; }
 
-    [JsonProperty("role")]
+    [JsonPropertyName("object")]
+    public string Object { get; set; }
+
+    [JsonPropertyName("created")]
+    public long Created { get; set; }
+
+    [JsonPropertyName("owned_by")]
+    public string OwnedBy { get; set; }
+}
+
+/// <summary>Response of <c>POST {base}/v1/chat/completions</c>. Enhanced text is at <c>choices[0].message.content</c>.</summary>
+public class ChatCompletionResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; }
+
+    [JsonPropertyName("model")]
+    public string Model { get; set; }
+
+    [JsonPropertyName("choices")]
+    public List<ChatChoice> Choices { get; set; }
+}
+
+/// <summary>A single choice in a chat completion response.</summary>
+public class ChatChoice
+{
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
+
+    [JsonPropertyName("finish_reason")]
+    public string FinishReason { get; set; }
+
+    [JsonPropertyName("message")]
+    public ChatResponseMessage Message { get; set; }
+}
+
+/// <summary>The assistant message inside a chat completion choice. <see cref="Content"/> may be null per the spec.</summary>
+public class ChatResponseMessage
+{
+    [JsonPropertyName("role")]
     public string Role { get; set; }
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; }
 }
 
-/// <summary>The root object containing a list of models.</summary>
-public class RootObject // TODO: Rename this class to something more descriptive
+/// <summary>OpenAI-style error envelope: <c>{ "error": { "message": ..., "type": ..., "code": ... } }</c>.</summary>
+public class ChatErrorResponse
 {
-    [JsonProperty("models")]
-    public List<ModelData> Data { get; set; }
+    [JsonPropertyName("error")]
+    public ChatError Error { get; set; }
+}
+
+/// <summary>The error body of an OpenAI-style error response.</summary>
+public class ChatError
+{
+    [JsonPropertyName("message")]
+    public string Message { get; set; }
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; }
+
+    [JsonPropertyName("code")]
+    public object Code { get; set; }
 }

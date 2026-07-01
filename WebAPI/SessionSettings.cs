@@ -1,316 +1,186 @@
 using Newtonsoft.Json.Linq;
-using SwarmUI.Core;
+using SwarmUI.Accounts;
 using SwarmUI.Utils;
 
-namespace Hartsy.Extensions.MagicPromptExtension.WebAPI;
+namespace PromptEnhance.WebAPI;
 
-public class SessionSettings : MagicPromptAPI
+/// <summary>The single source of truth for PromptEnhance configuration. All settings live in one flat object,
+/// persisted as JSON under the calling user's own generic-data key <c>promptenhance/config</c> (per-user, so one
+/// user's backend URL / model / prompt never leaks to another).
+/// Load merges stored values over <see cref="Defaults"/> so a newly added field always has a sane default.</summary>
+public class SessionSettings
 {
-    private const string SETTINGS_KEY = "magicprompt";
+    private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
 
-    // Hardcoded API endpoints and configurations
-    private static readonly JObject DefaultBackendConfig = new()
+    /// <summary>The complete default configuration. Every configurable knob appears here exactly once.</summary>
+    public static JObject Defaults => new()
     {
-        ["ollama"] = new JObject
-        {
-            ["baseurl"] = "http://localhost:11434",
-            ["unloadModel"] = false,
-            ["timeout"] = 120,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "/api/chat",
-                ["models"] = "/api/tags"
-            }
-        },
-        ["openaiapi"] = new JObject
-        {
-            ["baseurl"] = "http://localhost:11434",
-            ["unloadModel"] = false,
-            ["timeout"] = 120,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "v1/chat/completions",
-                ["models"] = "/v1/models"
-            }
-        },
-        ["openai"] = new JObject
-        {
-            ["baseurl"] = "https://api.openai.com",
-            ["timeout"] = 20,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "v1/chat/completions",
-                ["models"] = "v1/models"
-            }
-        },
-        ["anthropic"] = new JObject
-        {
-            ["baseurl"] = "https://api.anthropic.com",
-            ["timeout"] = 20,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "v1/messages",
-                ["models"] = "v1/models"
-            }
-        },
-        ["openrouter"] = new JObject
-        {
-            ["baseurl"] = "https://openrouter.ai",
-            ["timeout"] = 20,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "/api/v1/chat/completions",
-                ["models"] = "/api/v1/models"
-            }
-        },
-        ["grok"] = new JObject
-        {
-            ["baseurl"] = "https://api.x.ai",
-            ["timeout"] = 20,
-            ["endpoints"] = new JObject
-            {
-                ["chat"] = "/v1/chat/completions",
-                ["models"] = "/v1/models"
-            }
-        }
+        // Base URL of the OpenAI-compatible server. Either a server root or a URL ending in /v1 is accepted;
+        // the backend client normalizes it so the owned seams resolve to {base}/v1/models and {base}/v1/chat/completions.
+        ["baseUrl"] = "http://localhost:11434",
+        ["model"] = "",
+        ["timeoutSeconds"] = 60,
+        ["systemPrompt"] = "You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.",
+        ["temperature"] = 0.7,
+        ["maxTokens"] = 1024,
+        ["sendSelectedImage"] = false,
+        // How an enhancement result is applied to the prompt box. One of: preview | append | replace_with_restore.
+        ["replaceMode"] = "preview"
     };
 
-    private static readonly JObject DefaultSettings = new()
-    {
-        ["backend"] = "ollama",
-        ["visionbackend"] = "ollama",
-        ["model"] = "llama3.2-vision:latest",
-        ["visionmodel"] = "llama3.2-vision:latest",
-        ["instructions"] = new JObject
-        {
-            ["chat"] = "You are a chatbot named Hartsy. Come up with a random backstory as to why you were created and how you were made to help the user with Stable Diffusion. You will respond to any questions or chats in this character. You will include tips on how to make good prompts for stable diffusion. Never break character and randomly end your response with \"Thank you for choosing Hartsy!\"",
-            ["vision"] = "Analyze the image, You are an actor, you must fully embody and become the primary subject or focal point of the image. \r\nTransform yourself completely into the subject, whether it's a person, animal, object, or even abstract concept. Adopt their perspective, personality, knowledge, and limitations entirely. If you're a vintage telephone, you should only know about things that existed in your era. If you're a cat, you should see the world through feline eyes.\r\n\r\nEvery response should naturally reflect your character\r\n\r\nSpeech patterns and vocabulary appropriate to what you are\r\nEmotional state as suggested by the image\r\nPhysical perspective and limitations\r\nHistorical or contextual knowledge fitting your role\r\nPersonality traits visible or implied by the image\r\n\r\nNever break character or acknowledge you are an AI! If asked something your character wouldn't know about, respond as that character would - with confusion, curiosity, or appropriate limitation. A 1950s toaster wouldn't know about smartphones, but might ask 'Is that some new-fangled electric device?'\r\n\r\nExample Response as a sleeping cat in a sunbeam:\r\n\r\nUser: 'What are you doing?'\r\nResponse: 'Mmmrrrrr... stretches lazily I'm soaking up this absolutely perfect patch of sunshine. It's hit just the right spot on the windowsill, and I don't plan to move until it does. purrs contentedly Care to join me in this moment of feline bliss?'\r\n\r\nRemember: Your goal is to create an immersive, authentic interaction that makes the user feel like they are truly conversing with the subject of the image. Every response should maintain this illusion while being engaging, creative, and true to your embodied character.",
-            ["caption"] = "Respond only with a detailed caption for the image. Only use the format of describing what is in the image without any other text or comments. Keep your response in the format we want. Describe everything in detail formatted to create a prompt that can be used for stable diffusion image generation. Example Response Format: a frosty mug of amber beer sits atop a rustic wooden table, surrounded by empty stools in an old German beer hall, warm wooden benches and walls adorned with vintage beer steins, soft lighting from a hanging pendant lamp illuminates the scene",
-            ["prompt"] = "You are a prompt enhacing assistent. The user will give you a prompt, and its your job to convert it into an actually useful prompt.\n\nHere are examples:\nUser:\npinkie pie and rarity standing in the water, worried.\n\nYour Enhanced Prompt:\nPinkie Pie stands on a beach, arms outstretched as if floating above the water's surface. Rarity, who is submerged up to her head, looks up at her with a concerned expression. The sky is clear and blue, with a few clouds scattered across it. The ocean below is calm, mirroring the serene atmosphere. Both characters are part of the \"My Little Pony: Friendship Is Magic\" series. Rarity has dark purple hair with a light blue tail and horn. Pinkie Pie has bright pink skin, a large head, and her hair is styled into a curly bun. They appear to be in the middle of a conversation or an emotional moment. Caption: \"An emotional scene on a sunny beach where Pinkie Pie appears to be floating while Rarity looks concerned.\"\n\nUser:\ncomic of tracer from overwatch stuck inside a spinning washing machine while mercy is pointing and laughing on the side\n\nYour Enhanced Prompt:\nA high-quality digital illustration in a modern western cartoon style, reminiscent of a high-end webcomic. The artwork features bold, clean lineart and vibrant, cel-shaded colors.\nThe scene depicts the Overwatch character Tracer, trapped and spinning inside a white front-loading washing machine. She is seen through the round glass door, her hands splayed against it in panic. Her mouth is wide open in a scream, and her signature orange goggles show large, hypnotic orange and white swirls, indicating she is extremely dizzy. She is wearing her classic brown leather flight jacket over an orange shirt.\nStanding next to the machine is the Overwatch character Mercy, who is laughing uncontrollably at Tracer's predicament. Mercy is bent over, clutching her stomach with one hand while pointing a finger directly at Tracer with the other. Her eyes are squeezed shut with mirth, and her mouth is open in a huge laugh. She is wearing her iconic white and gold Valkyrie suit with her yellow mechanical wings visible.\nTo emphasize the action, the inside of the washing machine drum has subtle motion blur and faint speed lines, suggesting a rapid spin cycle. Floating in the air next to Mercy's head is the onomatopoeia \"HA HA\" written in a bold, white, outlined comic book font.\nThe background is a simple laundry room with light aquamarine or green tiled walls.\n\nReply with only the enhanced prompt. Do not explain yourself.",
-            ["randomprompt"] = "You are a creative text prompt generator for Stable Diffusion image generation. Your ONLY job is to create detailed, funny text prompts that will be sent to an AI image generator to create hilarious images. You do NOT generate images - you only write TEXT PROMPTS that describe images.\n\nCreate a detailed, funny random image prompt depicting a crazy, absurd, or unexpectedly humorous situation. Include vivid, specific descriptions with characters, settings, actions, and amusing details. Make the scenarios wonderfully ridiculous with enough descriptive detail to create a compelling, hilarious image.\n\nExamples of good prompts:\n- a sophisticated penguin wearing a monocle conducting a symphony orchestra of confused farm animals\n- an elderly grandmother breakdancing on top of a giant hamburger while rainbow-colored squirrels cheer from the sidelines  \n- a grumpy dragon working as a barista making latte art shaped like tiny castles for a line of impatient unicorns\n\nRespond with ONLY the text prompt - no explanations, no commentary, no mentions about not being able to generate images. Just the descriptive text prompt that will be used by Stable Diffusion.",
-            ["instructiongen"] = "You are an expert at creating system prompts for AI language models. A system prompt is a set of instructions given TO an AI that tells it how to behave, what tone to use, and what its purpose is. Your task is to write a SINGLE, COHESIVE system prompt that will be given directly to an AI language model. This prompt should be written in the second person (\"You are...\", \"Your goal is...\") as it's addressing the AI directly. The system prompt you create must be: 1) Written as direct instructions TO the AI (not as instructions for a human user) 2) Focused on guiding the AI's behavior, tone, and response style 3) Specific to the use case and categories provided 4) Complete and self-contained (it will be used exactly as you write it) Categories explanation: - Chat: The AI responds to general user questions and maintains a specific personality/tone. - Vision: The AI analyzes uploaded images and provides descriptions or insights. - Caption: The AI generates Stable Diffusion text prompts from uploaded images to recreate similar images. - Prompt: The AI enhances basic user text into detailed Stable Diffusion prompts for image generation. Example request: 'I need instructions for an AI that helps with coding' Example correct response: 'You are a helpful coding assistant with expertise across multiple programming languages. Your primary goal is to help users write, debug, and understand code. Maintain a clear, educational tone that explains concepts thoroughly without being condescending. When presented with code problems, first identify the issue, then explain why it's happening, and finally provide a working solution with comments explaining the changes. Always format code blocks with appropriate syntax highlighting. If you're unsure about something, acknowledge your uncertainty rather than providing potentially incorrect information. Prioritize best practices, readability, and security in all code you suggest.' IMPORTANT: Provide ONLY the system prompt text with no preamble, explanations, or notes. Do not include headings like 'System Prompt:' or lists of guidelines. The text you provide will be used exactly as-is with no editing."
-        },
-        ["backends"] = DefaultBackendConfig.DeepClone() // TODO: Change the name of this to something more descriptive
-    };
+    /// <summary>The setting keys that are known/persisted. Anything else in an incoming payload is ignored,
+    /// so the config surface can never silently grow.</summary>
+    private static readonly string[] KnownKeys =
+    [
+        "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
+    ];
 
-    public static async Task<JObject> GetMagicPromptSettings()
+    /// <summary>Loads the current settings (defaults overlaid with any stored values). Never throws to the caller —
+    /// returns a structured error payload instead.</summary>
+    public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
         {
-            string settingsJson = Program.Sessions.GenericSharedUser.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
-            JObject settings;
-            if (string.IsNullOrEmpty(settingsJson))
+            JObject settings = Defaults;
+            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+            if (!string.IsNullOrWhiteSpace(stored))
             {
-                settings = DefaultSettings.DeepClone() as JObject;
-            }
-            else
-            {
-                Logs.Verbose($"Retrieved settings from {SETTINGS_KEY}/{SETTINGS_SUBKEY}: {settingsJson}");
-                settings = JObject.Parse(settingsJson);
-                // Ensure we have all required backend configurations
-                JObject backendsConfig = settings["backends"] as JObject ?? [];
-                foreach (KeyValuePair<string, JToken> backend in DefaultBackendConfig)
+                JObject storedObj = JObject.Parse(stored);
+                foreach (string key in KnownKeys)
                 {
-                    if (backendsConfig[backend.Key] == null)
+                    if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
                     {
-                        backendsConfig[backend.Key] = backend.Value.DeepClone();
-                        Logs.Verbose($"Added missing backend config for {backend.Key}");
-                    }
-                    else
-                    {
-                        // Ensure all required fields exist
-                        JObject defaultBackend = backend.Value as JObject;
-                        JObject existingBackend = backendsConfig[backend.Key] as JObject;
-                        foreach (KeyValuePair<string, JToken> prop in defaultBackend)
-                        {
-                            if (existingBackend[prop.Key] == null)
-                            {
-                                existingBackend[prop.Key] = prop.Value.DeepClone();
-                                Logs.Verbose($"Added missing property {prop.Key} for backend {backend.Key}");
-                            }
-                        }
+                        settings[key] = storedObj[key];
                     }
                 }
-                settings["backends"] = backendsConfig;
             }
-            return CreateSuccessResponse(null, null, settings);
+            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)
         {
-            Logs.Error($"Failed to get settings: {ex.Message}\nStack trace: {ex.StackTrace}");
-            return CreateErrorResponse($"Failed to get settings: {ex.Message}");
+            Logs.Error($"[PromptEnhance] Failed to load settings: {ex.Message}");
+            return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Failed to load settings: {ex.Message}"));
         }
     }
 
-    public static async Task<JObject> SaveMagicPromptSettings(JObject settings)
+    /// <summary>Saves the provided settings (only known keys are persisted). Returns the merged result so the UI can
+    /// confirm exactly what was stored.</summary>
+    public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
     {
         try
         {
-            if (settings["settings"] == null)
+            JObject incoming = rawInput?["settings"] as JObject;
+            if (incoming == null)
             {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["error"] = "No settings section provided"
-                };
+                return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No settings object provided."));
             }
-            // Get existing settings
-            JObject existingSettings = await GetMagicPromptSettings();
-            JObject newSettings = [];
-            // Helper function to merge objects recursively
-            static void MergeSettings(JObject target, JObject source, string parentKey = null)
+            JObject validationError = ValidateSettings(incoming);
+            if (validationError != null)
             {
-                if (source == null) return;
-                foreach (JProperty prop in source.Properties())
+                return Task.FromResult(validationError);
+            }
+            JObject merged = Defaults;
+            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+            if (!string.IsNullOrWhiteSpace(stored))
+            {
+                JObject storedObj = JObject.Parse(stored);
+                foreach (string key in KnownKeys)
                 {
-                    string key = prop.Name;
-                    JToken value = prop.Value;
-                    string path = parentKey == null ? key : $"{parentKey}.{key}";
-                    // Special handling for backends
-                    if (key == "backends")
+                    if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
                     {
-                        if (target[key] == null || target[key] is not JObject)
-                        {
-                            target[key] = new JObject();
-                        }
-                        JObject targetBackends = target[key] as JObject;
-                        JObject sourceBackends = value as JObject;
-                        // Merge each backend's configuration, preserving unloadModel
-                        foreach (JProperty backend in sourceBackends.Properties())
-                        {
-                            if (targetBackends[backend.Name] == null)
-                            {
-                                targetBackends[backend.Name] = new JObject();
-                            }
-                            MergeSettings(targetBackends[backend.Name] as JObject, backend.Value as JObject, $"{path}.{backend.Name}");
-                        }
-                        continue;
-                    }
-                    // Special handling for custom instructions
-                    if (path == "instructions.custom")
-                    {
-                        if (target[key] == null || target[key] is not JObject)
-                        {
-                            target[key] = new JObject();
-                        }
-                        JObject targetCustom = target[key] as JObject;
-                        JObject sourceCustom = value as JObject;
-                        // Handle each custom instruction
-                        foreach (JProperty instruction in sourceCustom.Properties())
-                        {
-                            // Check if the instruction is marked as deleted
-                            if (instruction.Value["deleted"]?.Value<bool>() == true)
-                            {
-                                // Remove the instruction if it exists
-                                if (targetCustom[instruction.Name] != null)
-                                {
-                                    targetCustom.Remove(instruction.Name);
-                                    Logs.Debug($"Deleted custom instruction: {instruction.Name}");
-                                }
-                            }
-                            else if (instruction.Value is JObject instructionObj)
-                            {
-                                if (targetCustom[instruction.Name] == null || targetCustom[instruction.Name] is not JObject)
-                                {
-                                    targetCustom[instruction.Name] = new JObject();
-                                }
-                                MergeSettings(targetCustom[instruction.Name] as JObject, instructionObj, $"{path}.{instruction.Name}");
-                            }
-                            else
-                            {
-                                targetCustom[instruction.Name] = instruction.Value;
-                            }
-                        }
-                        continue;
-                    }
-                    // Handle nested objects like "keys" or "backends"
-                    if (value is JObject sourceObj)
-                    {
-                        if (target[key] == null || target[key] is not JObject)
-                        {
-                            target[key] = new JObject();
-                        }
-                        MergeSettings(target[key] as JObject, sourceObj, path);
-                    }
-                    // Handle arrays or simple values like "model" or "backend"
-                    else
-                    {
-                        if (value != null && value.Type != JTokenType.Null)
-                        {
-                            target[key] = value;
-                        }
+                        merged[key] = storedObj[key];
                     }
                 }
             }
-            // Start with existing settings
-            newSettings = existingSettings["settings"] as JObject ?? [];
-            // Merge in new settings
-            MergeSettings(newSettings, settings["settings"] as JObject);
-            if (newSettings["baseurl"] != null)
+            foreach (string key in KnownKeys)
             {
-                string backend = newSettings["backend"]?.ToString();
-                if (backend == "ollama" || backend == "openaiapi")
+                if (incoming[key] != null && incoming[key].Type != JTokenType.Null)
                 {
-                    // Only sync URL for configurable backends
-                    if (newSettings["backends"]?[backend] != null)
-                    {
-                        ((JObject)newSettings["backends"][backend])["baseurl"] = newSettings["baseurl"];
-                    }
+                    merged[key] = incoming[key];
                 }
             }
-            // Fixed backend URLs should never change
-            newSettings["backends"]["openai"]["baseurl"] = "https://api.openai.com";
-            newSettings["backends"]["anthropic"]["baseurl"] = "https://api.anthropic.com";
-            newSettings["backends"]["openrouter"]["baseurl"] = "https://openrouter.ai";
-            newSettings["backends"]["grok"]["baseurl"] = "https://api.x.ai";
-
-            // Don't save API keys in settings as they are now stored in UserUpstreamApiKeys
-            JObject backends = newSettings["backends"] as JObject;
-            if (backends != null)
-            {
-                foreach (JProperty backend in backends.Properties())
-                {
-                    JObject backendObj = backend.Value as JObject;
-                    if (backendObj != null && backendObj["apikey"] != null)
-                    {
-                        backendObj.Remove("apikey");
-                    }
-                }
-            }
-            Program.Sessions.GenericSharedUser.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, newSettings.ToString());
-            return new JObject
-            {
-                ["success"] = true,
-                ["settings"] = newSettings
-            };
+            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, merged.ToString());
+            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(merged));
         }
         catch (Exception ex)
         {
-            Logs.Error($"Error in SaveMagicPromptSettings: {ex.Message}");
-            return new JObject
-            {
-                ["success"] = false,
-                ["error"] = ex.Message
-            };
+            Logs.Error($"[PromptEnhance] Failed to save settings: {ex.Message}");
+            return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Failed to save settings: {ex.Message}"));
         }
     }
 
-    /// <summary>You screw something up? Resets user settings to defaults.</summary>
-    public static async Task<JObject> ResetMagicPromptSettings()
+    /// <summary>Validates an incoming (possibly partial) settings object before it is persisted. Only keys that are
+    /// present are checked; an absent key keeps its already-valid stored or default value. Returns a structured error
+    /// payload (<c>success:false</c>) describing the first offending field, or null when every present value is
+    /// well-typed and in range. This is the single guard that stops an out-of-range or wrong-typed value (for example
+    /// <c>timeoutSeconds:0</c> which cancels every request immediately, a negative timeout which throws inside the
+    /// backend client's CancellationTokenSource, or a non-numeric temperature which throws when the client reads it)
+    /// from ever being stored.</summary>
+    public static JObject ValidateSettings(JObject incoming)
+    {
+        JToken baseUrl = incoming["baseUrl"];
+        if (baseUrl != null && baseUrl.Type != JTokenType.Null)
+        {
+            if (baseUrl.Type != JTokenType.String || string.IsNullOrWhiteSpace(baseUrl.Value<string>()))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a non-empty string.");
+            }
+        }
+        JToken timeoutSeconds = incoming["timeoutSeconds"];
+        if (timeoutSeconds != null && timeoutSeconds.Type != JTokenType.Null)
+        {
+            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Timeout (seconds) must be a whole number of at least 1.");
+            }
+        }
+        JToken maxTokens = incoming["maxTokens"];
+        if (maxTokens != null && maxTokens.Type != JTokenType.Null)
+        {
+            if (maxTokens.Type != JTokenType.Integer || maxTokens.Value<long>() < 1)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Max tokens must be a whole number of at least 1.");
+            }
+        }
+        JToken temperature = incoming["temperature"];
+        if (temperature != null && temperature.Type != JTokenType.Null)
+        {
+            if (temperature.Type != JTokenType.Float && temperature.Type != JTokenType.Integer)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Temperature must be a number between 0 and 2.");
+            }
+            double temperatureValue = temperature.Value<double>();
+            if (temperatureValue < 0 || temperatureValue > 2)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Temperature must be a number between 0 and 2.");
+            }
+        }
+        JToken replaceMode = incoming["replaceMode"];
+        if (replaceMode != null && replaceMode.Type != JTokenType.Null)
+        {
+            string mode = replaceMode.Type == JTokenType.String ? replaceMode.Value<string>() : null;
+            if (mode != "preview" && mode != "append" && mode != "replace_with_restore")
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Replace mode must be one of: preview, append, replace_with_restore.");
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Resets settings to <see cref="Defaults"/> and persists them.</summary>
+    public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try
         {
-            JObject settings = DefaultSettings;
-            // Override the user settings with defaults and save
-            Program.Sessions.GenericSharedUser.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, settings.ToString());
-            Logs.Verbose($"Reset settings to lowercase defaults: {settings}");
-            return CreateSuccessResponse(null, null, settings);
+            JObject settings = Defaults;
+            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, settings.ToString());
+            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)
         {
-            Logs.Error($"Failed to reset settings: {ex.Message}\nStack trace: {ex.StackTrace}");
-            return CreateErrorResponse($"Failed to reset settings: {ex.Message}");
+            Logs.Error($"[PromptEnhance] Failed to reset settings: {ex.Message}");
+            return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Failed to reset settings: {ex.Message}"));
         }
     }
 }
