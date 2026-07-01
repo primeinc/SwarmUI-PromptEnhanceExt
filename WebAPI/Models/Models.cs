@@ -99,5 +99,5 @@ public class ChatError
     public string Type { get; set; }
 
     [JsonPropertyName("code")]
-    public object Code { get; set; }
+    public string Code { get; set; }
 }
