@@ -4,11 +4,24 @@ using SwarmUI.Utils;
 
 namespace PromptEnhance.WebAPI;
 
+/// <summary>
+/// Settings persistence: the single server-side source of truth for the
+/// eight-key settings schema, stored per-user through SwarmUI's own generic
+/// user-data store (User.GetGenericData/SaveGenericData). Reads merge stored
+/// values over <see cref="Defaults"/> key-by-key, so unknown or missing keys
+/// can never corrupt the effective settings.
+/// </summary>
 public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
 
+    /// <summary>
+    /// The canonical defaults. Frontend/contracts.ts mirrors these verbatim
+    /// (SettingsDefaultsParityTests pins the systemPrompt text); a fresh
+    /// profile works against a local Ollama with zero configuration except
+    /// picking a model.
+    /// </summary>
     public static JObject Defaults => new()
     {
         ["baseUrl"] = "http://localhost:11434",
@@ -26,6 +39,7 @@ public class SessionSettings
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
     ];
 
+    /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
     public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
@@ -52,6 +66,12 @@ public class SessionSettings
         }
     }
 
+    /// <summary>
+    /// API route: validates then persists a partial settings object. The merge
+    /// order is defaults ← previously stored ← incoming, per known key, so a
+    /// partial save never erases unrelated settings and unknown keys are
+    /// dropped at the boundary.
+    /// </summary>
     public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
     {
         try
@@ -96,6 +116,12 @@ public class SessionSettings
         }
     }
 
+    /// <summary>
+    /// Schema validation for an incoming partial settings object. Integer
+    /// fields are bounded to [1, int.MaxValue] as long values — an over-range
+    /// stored value would otherwise overflow later Value&lt;int?&gt; reads into an
+    /// unclassified 500. Returns null when valid, else a classified error response.
+    /// </summary>
     public static JObject ValidateSettings(JObject incoming)
     {
         JToken baseUrl = incoming["baseUrl"];
@@ -147,6 +173,7 @@ public class SessionSettings
         return null;
     }
 
+    /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/> and returns them.</summary>
     public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try

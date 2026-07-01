@@ -13,3 +13,4 @@ Thumbs.db
 /logs
 /.env
 /config.json
+/Tests/frontend/out

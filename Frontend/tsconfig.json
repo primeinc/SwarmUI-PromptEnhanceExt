@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "target": "es2022",
+        "lib": ["es2022", "dom", "dom.iterable"],
+        "strict": true,
+        "noEmitOnError": true,
+        "removeComments": false,
+        "newLine": "lf",
+        "outDir": "../Assets",
+        "types": []
+    },
+    "files": ["swarm.d.ts", "contracts.ts", "settings.ts", "promptenhance.ts"]
+}

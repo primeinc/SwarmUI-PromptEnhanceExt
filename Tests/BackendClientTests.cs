@@ -1,3 +1,5 @@
+using Newtonsoft.Json.Linq;
+
 namespace PromptEnhance.Tests;
 
 public class BackendClientTests
@@ -28,5 +30,20 @@ public class BackendClientTests
         string? result = WebAPI.BackendClient.NormalizeBaseUrl(input!);
 
         Xunit.Assert.Null(result);
+    }
+
+    [Xunit.Theory]
+    [Xunit.InlineData("{}")]
+    [Xunit.InlineData("{\"prompt\":\"\"}")]
+    [Xunit.InlineData("{\"prompt\":\"   \"}")]
+    public async Task PromptEnhanceRun_EmptyPrompt_ReturnsClassifiedErrorBeforeAnySessionUse(string rawJson)
+    {
+        JObject rawInput = JObject.Parse(rawJson);
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(rawInput, null!);
+
+        Xunit.Assert.False(result["success"]!.Value<bool>());
+        Xunit.Assert.Equal("generic", result["errorCategory"]!.Value<string>());
+        Xunit.Assert.Contains("No prompt text", result["error"]!.Value<string>());
     }
 }

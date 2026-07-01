@@ -2,13 +2,18 @@
   "name": "swarmui-promptenhance",
   "version": "1.0.0",
   "private": true,
-  "description": "Dev tooling for the PromptEnhance SwarmUI extension. The extension itself is a .NET project; this manifest exists only to declare the jsdom dev-dependency and the frontend behavior-test runner.",
+  "description": "Dev tooling for the PromptEnhance SwarmUI extension. Frontend/*.ts is the authoritative frontend source; the committed Assets/*.js SwarmUI serves is tsc build output validated by check:frontend-parity. The extension itself is a .NET project.",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {
-    "test:frontend": "node Tests/frontend/promptenhance.test.js"
+    "build:frontend": "tsc -p Frontend",
+    "check:frontend-parity": "tsc -p Frontend && git diff --exit-code -- Assets/contracts.js Assets/settings.js Assets/promptenhance.js",
+    "test:frontend": "tsc -p Tests/frontend && node Tests/frontend/out/promptenhance.test.js"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.1.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3"
   }
 }

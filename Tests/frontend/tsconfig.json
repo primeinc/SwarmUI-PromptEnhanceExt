@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "target": "es2022",
+        "lib": ["es2022", "dom", "dom.iterable"],
+        "module": "node16",
+        "moduleResolution": "node16",
+        "strict": true,
+        "esModuleInterop": true,
+        "noEmitOnError": true,
+        "newLine": "lf",
+        "rootDir": ".",
+        "outDir": "out",
+        "types": ["node"]
+    },
+    "files": ["promptenhance.test.ts", "../../Frontend/swarm.d.ts"]
+}

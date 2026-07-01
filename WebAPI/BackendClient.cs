@@ -11,8 +11,20 @@ using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
+/// <summary>
+/// Backend transport: owns the two OpenAI-compatible seams
+/// (`GET /v1/models`, `POST /v1/chat/completions`) plus the reachability
+/// probe in front of them. Every failure leaves this class as a classified
+/// <see cref="PromptEnhanceErrorCategory"/> response — no exception escapes
+/// to SwarmUI's generic 500 handler.
+/// </summary>
 public class BackendClient
 {
+    /// <summary>
+    /// Shared client from SwarmUI's own factory, with the per-client timeout
+    /// disabled: timeouts are enforced per-request via CancellationTokenSource
+    /// so the user's timeoutSeconds setting applies per call, not per client.
+    /// </summary>
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
     private static HttpClient CreateHttpClient()
@@ -28,6 +40,12 @@ public class BackendClient
     private static readonly object ReachabilityLock = new();
     private static readonly Dictionary<string, (bool reachable, DateTime whenUtc)> ReachabilityCache = new();
 
+    /// <summary>
+    /// Normalizes a user-entered base URL: trims, strips trailing slashes and
+    /// a trailing `/v1` (both root URLs and /v1 URLs are accepted in settings),
+    /// and requires an absolute http(s) URI. Returns null for anything else —
+    /// the caller classifies that as <see cref="PromptEnhanceErrorCategory.InvalidBaseUrl"/>.
+    /// </summary>
     public static string NormalizeBaseUrl(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -51,6 +69,13 @@ public class BackendClient
 
     private static string ChatUrl(string normalizedBase) => $"{normalizedBase}/v1/chat/completions";
 
+    /// <summary>
+    /// Cheap 3-second reachability probe with a small TTL cache (10s on
+    /// success, 30s on failure) so an offline backend fails fast and
+    /// repeatedly clicking Enhance doesn't hammer a dead host. Any HTTP
+    /// response — even an error page — counts as reachable; only transport
+    /// failures and timeouts count as unreachable.
+    /// </summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
         lock (ReachabilityLock)
@@ -84,6 +109,7 @@ public class BackendClient
         return reachable;
     }
 
+    /// <summary>Loads the session's settings and validates the base URL, funneling failures through <paramref name="setError"/> as classified responses.</summary>
     private static async Task<(JObject settings, string normalizedBase)> ResolveConfig(Session session, Action<JObject> setError)
     {
         JObject settingsResponse = await SessionSettings.GetPromptEnhanceSettings(session);
@@ -102,6 +128,7 @@ public class BackendClient
         return (settings, normalizedBase);
     }
 
+    /// <summary>API route: lists the backend's models for the settings dropdown. Registered by <see cref="PromptEnhanceAPI.Register"/>.</summary>
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
@@ -118,6 +145,13 @@ public class BackendClient
         return await ExecuteListModels(normalizedBase, timeoutSec);
     }
 
+    /// <summary>
+    /// The raw `GET /v1/models` round-trip, independent of session state so
+    /// transport behavior is testable against a real socket (BackendTransportTests).
+    /// Classification: HTTP non-success via <see cref="ErrorHandler.CategorizeHttpStatus"/>,
+    /// unparseable JSON as InvalidResponseShape, cancellation as Timeout,
+    /// connection failure as ServerUnavailable.
+    /// </summary>
     public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec)
     {
         try
@@ -152,6 +186,12 @@ public class BackendClient
         }
     }
 
+    /// <summary>
+    /// API route: the enhance call. Validates the prompt before touching any
+    /// session state, resolves settings, requires a configured model, probes
+    /// reachability, parses media, then delegates to <see cref="ExecuteChat"/>.
+    /// Every early exit is a classified error response.
+    /// </summary>
     public static async Task<JObject> PromptEnhanceRun(JObject rawInput, Session session)
     {
         string userText = rawInput?["prompt"]?.ToString();
@@ -190,6 +230,14 @@ public class BackendClient
         return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec);
     }
 
+    /// <summary>
+    /// The raw `POST /v1/chat/completions` round-trip (session-independent,
+    /// socket-tested like <see cref="ExecuteListModels"/>). A 400 on a request
+    /// that carried media is reclassified as UnsupportedImage when the body
+    /// blames the image (<see cref="ErrorHandler.LooksLikeImageRejection"/>),
+    /// so vision-incapable models produce an actionable error instead of a
+    /// generic HTTP failure.
+    /// </summary>
     public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec)
     {
         object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
@@ -232,6 +280,12 @@ public class BackendClient
         }
     }
 
+    /// <summary>
+    /// Boundary adapter for the request's media array. A present-but-dataless
+    /// entry throws ArgumentException (classified upstream as UnsupportedImage)
+    /// rather than silently sending a text-only request the user believes
+    /// included their image.
+    /// </summary>
     public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
     {
         List<BackendSchema.MediaContent> result = [];

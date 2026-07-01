@@ -2,6 +2,12 @@ using System.Net;
 
 namespace PromptEnhance.WebAPI;
 
+/// <summary>
+/// The extension's closed error taxonomy. Every backend failure the extension
+/// can encounter is classified into exactly one of these categories; API
+/// responses carry the snake_case code from <see cref="ErrorHandler.CategoryCode"/>
+/// plus user-actionable text from <see cref="ErrorHandler.Format"/>.
+/// </summary>
 public enum PromptEnhanceErrorCategory
 {
     ServerUnavailable,
@@ -15,8 +21,10 @@ public enum PromptEnhanceErrorCategory
     Generic
 }
 
+/// <summary>Maps raw failures (HTTP status codes, response bodies) into the classified taxonomy and user-facing text.</summary>
 public static class ErrorHandler
 {
+    /// <summary>The stable wire identifier for a category. These codes are API contract; the frontend and tests pin them.</summary>
     public static string CategoryCode(PromptEnhanceErrorCategory category) => category switch
     {
         PromptEnhanceErrorCategory.ServerUnavailable => "server_unavailable",
@@ -30,6 +38,13 @@ public static class ErrorHandler
         _ => "generic"
     };
 
+    /// <summary>
+    /// User-facing recovery text for a category, optionally followed by an
+    /// excerpt of the raw backend detail. Every message names the concrete
+    /// action the user can take (fix the URL, pick a model, raise the timeout,
+    /// disable image sending, ...) — classification without a recovery path
+    /// would just be a fancier way to be broken.
+    /// </summary>
     public static string Format(PromptEnhanceErrorCategory category, string detail = null)
     {
         string baseMessage = category switch
@@ -55,6 +70,12 @@ public static class ErrorHandler
         return string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage}\n\nDetail: {Excerpt(detail)}";
     }
 
+    /// <summary>
+    /// Classifies an HTTP non-success status. 404 maps to ModelMissing because
+    /// OpenAI-compatible servers commonly 404 both unknown routes and unknown
+    /// models; 401/403 map to Authentication; 5xx to ServerUnavailable;
+    /// anything unrecognized stays a generic HttpError rather than guessing.
+    /// </summary>
     public static PromptEnhanceErrorCategory CategorizeHttpStatus(HttpStatusCode status) => status switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => PromptEnhanceErrorCategory.Authentication,
@@ -65,6 +86,12 @@ public static class ErrorHandler
         _ => PromptEnhanceErrorCategory.HttpError
     };
 
+    /// <summary>
+    /// Heuristic for reclassifying a 400 on a request that carried media:
+    /// OpenAI-compatible servers phrase image rejection inconsistently, so a
+    /// body mentioning image/vision/multimodal is treated as UnsupportedImage.
+    /// Only consulted when media was actually attached (see BackendClient).
+    /// </summary>
     public static bool LooksLikeImageRejection(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -76,6 +103,7 @@ public static class ErrorHandler
             || body.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Caps raw backend text for safe inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>
     public static string Excerpt(string text, int max = 600)
     {
         if (string.IsNullOrEmpty(text))

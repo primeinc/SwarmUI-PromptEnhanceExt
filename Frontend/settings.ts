@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Settings persistence and model-discovery UI for the PromptEnhance extension.
  *
@@ -9,9 +8,11 @@
  * AUTHORITATIVE SOURCE: Frontend/settings.ts. The committed Assets/settings.js
  * is tsc build output — do not hand-edit it.
  */
+
 window.PromptEnhance = window.PromptEnhance || {};
+
 /** Writes the panel status line. `kind` is '' | 'ok' | 'error' (CSS class). */
-function peSetStatus(message, kind) {
+function peSetStatus(message: string, kind: string): void {
     const el = document.getElementById('pe_settings_status');
     if (!el) {
         return;
@@ -19,20 +20,20 @@ function peSetStatus(message, kind) {
     el.textContent = message || '';
     el.className = 'pe-settings-status' + (kind ? ' ' + kind : '');
 }
+
 /**
  * Loads settings from the server into PromptEnhance.settings.
  * Failure is surfaced to the console and the client keeps its defaults —
  * a broken settings store degrades to defaults visibly, never to a crash
  * that would take the Enhance button with it.
  */
-function peLoadSettings() {
+function peLoadSettings(): Promise<void> {
     return new Promise((resolve) => {
         genericRequest('GetPromptEnhanceSettings', {}, (data) => {
             const result = peAdaptSettingsResult(data);
             if (result.ok) {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
-            }
-            else {
+            } else {
                 console.error('[PromptEnhance] Failed to load settings:', result.error);
             }
             resolve();
@@ -42,26 +43,27 @@ function peLoadSettings() {
         });
     });
 }
+
 /**
  * DOM adapter: reads the panel fields into a full PESettings value.
  * Missing or non-numeric fields fall back to the current effective settings,
  * and numeric bounds mirror the server-side ValidateSettings floors so the
  * panel cannot even submit a value the server would reject as non-positive.
  */
-function peReadPanelValues() {
+function peReadPanelValues(): PESettings {
     const current = peEffectiveSettings();
-    const num = (id, fallback) => {
-        const el = document.getElementById(id);
+    const num = (id: string, fallback: number): number => {
+        const el = document.getElementById(id) as HTMLInputElement | null;
         const v = parseFloat(el?.value ?? '');
         return Number.isFinite(v) ? v : fallback;
     };
-    const text = (id, fallback) => {
-        const el = document.getElementById(id);
+    const text = (id: string, fallback: string): string => {
+        const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
         return el ? el.value : fallback;
     };
     const rawMode = text('pe_replace_mode', current.replaceMode);
-    const replaceMode = rawMode === 'append' || rawMode === 'replace_with_restore' ? rawMode : 'preview';
-    const sendImage = document.getElementById('pe_send_image');
+    const replaceMode: PEReplaceMode = rawMode === 'append' || rawMode === 'replace_with_restore' ? rawMode : 'preview';
+    const sendImage = document.getElementById('pe_send_image') as HTMLInputElement | null;
     return {
         baseUrl: text('pe_base_url', current.baseUrl).trim(),
         model: text('pe_model_select', current.model),
@@ -73,8 +75,9 @@ function peReadPanelValues() {
         replaceMode: replaceMode
     };
 }
+
 /** Persists the panel values through SavePromptEnhanceSettings. Resolves whether the save was accepted. */
-function peSaveSettings() {
+function peSaveSettings(): Promise<boolean> {
     const values = peReadPanelValues();
     peSetStatus('Saving…', '');
     return new Promise((resolve) => {
@@ -84,8 +87,7 @@ function peSaveSettings() {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
                 peSetStatus('Saved.', 'ok');
                 resolve(true);
-            }
-            else {
+            } else {
                 peSetStatus('Save failed: ' + result.error, 'error');
                 resolve(false);
             }
@@ -95,8 +97,9 @@ function peSaveSettings() {
         });
     });
 }
+
 /** Resets server-side settings to defaults, then repopulates the panel and refreshes the model list. */
-function peResetSettings() {
+function peResetSettings(): Promise<boolean> {
     peSetStatus('Resetting…', '');
     return new Promise((resolve) => {
         genericRequest('ResetPromptEnhanceSettings', {}, (data) => {
@@ -107,8 +110,7 @@ function peResetSettings() {
                 peSetStatus('Reset to defaults.', 'ok');
                 peFetchModels();
                 resolve(true);
-            }
-            else {
+            } else {
                 peSetStatus('Reset failed: ' + result.error, 'error');
                 resolve(false);
             }
@@ -118,14 +120,15 @@ function peResetSettings() {
         });
     });
 }
+
 /**
  * Populates the model dropdown from the backend's `/v1/models` discovery
  * route. Every failure mode (unreachable, HTTP error, empty list, transport
  * error) lands as a visible disabled option plus a status-line message —
  * never an empty dropdown with no explanation.
  */
-function peFetchModels() {
-    const select = document.getElementById('pe_model_select');
+function peFetchModels(): Promise<void> {
+    const select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
     if (!select) {
         return Promise.resolve();
     }
@@ -146,8 +149,7 @@ function peFetchModels() {
                     select.value = configured;
                 }
                 peSetStatus('', '');
-            }
-            else {
+            } else {
                 const opt = new Option('No models — check Base URL', '');
                 opt.disabled = true;
                 select.add(opt);
@@ -164,11 +166,12 @@ function peFetchModels() {
         });
     });
 }
+
 /** DOM adapter: writes the current effective settings into the panel fields. */
-function pePopulatePanel() {
+function pePopulatePanel(): void {
     const current = peEffectiveSettings();
-    const set = (id, value) => {
-        const el = document.getElementById(id);
+    const set = (id: string, value: string | number): void => {
+        const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
         if (el) {
             el.value = String(value);
         }
@@ -179,17 +182,18 @@ function pePopulatePanel() {
     set('pe_temperature', current.temperature);
     set('pe_max_tokens', current.maxTokens);
     set('pe_replace_mode', current.replaceMode);
-    const sendImage = document.getElementById('pe_send_image');
+    const sendImage = document.getElementById('pe_send_image') as HTMLInputElement | null;
     if (sendImage) {
         sendImage.checked = !!current.sendSelectedImage;
     }
-    const model = document.getElementById('pe_model_select');
+    const model = document.getElementById('pe_model_select') as HTMLSelectElement | null;
     if (model && current.model && [...model.options].some(o => o.value === current.model)) {
         model.value = current.model;
     }
 }
+
 /** Builds (once) and returns the settings panel, mounted on document.body. */
-function peBuildSettingsPanel() {
+function peBuildSettingsPanel(): HTMLElement {
     let panel = document.getElementById('pe_settings_panel');
     if (panel) {
         return panel;
@@ -250,33 +254,37 @@ function peBuildSettingsPanel() {
         </div>
     `;
     document.body.appendChild(panel);
-    panel.querySelector('#pe_settings_close').addEventListener('click', peCloseSettingsPanel);
-    panel.querySelector('#pe_save_btn').addEventListener('click', () => { peSaveSettings(); });
-    panel.querySelector('#pe_reset_btn').addEventListener('click', () => { peResetSettings(); });
-    panel.querySelector('#pe_refresh_models').addEventListener('click', (e) => { e.preventDefault(); peFetchModels(); });
+
+    panel.querySelector<HTMLButtonElement>('#pe_settings_close')!.addEventListener('click', peCloseSettingsPanel);
+    panel.querySelector<HTMLButtonElement>('#pe_save_btn')!.addEventListener('click', () => { peSaveSettings(); });
+    panel.querySelector<HTMLButtonElement>('#pe_reset_btn')!.addEventListener('click', () => { peResetSettings(); });
+    panel.querySelector<HTMLButtonElement>('#pe_refresh_models')!.addEventListener('click', (e) => { e.preventDefault(); peFetchModels(); });
     document.addEventListener('click', (e) => {
-        if (panel.style.display !== 'block') {
+        if (panel!.style.display !== 'block') {
             return;
         }
         const trigger = document.getElementById('pe_settings_button');
-        if (!panel.contains(e.target) && trigger && !trigger.contains(e.target)) {
+        if (!panel!.contains(e.target as Node | null) && trigger && !trigger.contains(e.target as Node | null)) {
             peCloseSettingsPanel();
         }
     });
     return panel;
 }
-function peOpenSettingsPanel() {
+
+function peOpenSettingsPanel(): void {
     const panel = peBuildSettingsPanel();
     pePopulatePanel();
     peSetStatus('', '');
     panel.style.display = 'block';
 }
-function peCloseSettingsPanel() {
+
+function peCloseSettingsPanel(): void {
     const panel = document.getElementById('pe_settings_panel');
     if (panel) {
         panel.style.display = 'none';
     }
 }
+
 window.PromptEnhance.loadSettings = peLoadSettings;
 window.PromptEnhance.fetchModels = peFetchModels;
 window.PromptEnhance.openSettingsPanel = peOpenSettingsPanel;

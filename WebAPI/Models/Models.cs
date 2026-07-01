@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace PromptEnhance.WebAPI.Models;
 
+/// <summary>A model entry as the extension's API returns it to the frontend (id + display name).</summary>
 public class ModelData
 {
     [JsonPropertyName("id")]
@@ -11,6 +12,7 @@ public class ModelData
     public string Name { get; set; }
 }
 
+/// <summary>Wire shape of an OpenAI-compatible `GET /v1/models` response envelope.</summary>
 public class ModelsListResponse
 {
     [JsonPropertyName("object")]
@@ -20,6 +22,7 @@ public class ModelsListResponse
     public List<ModelEntry> Data { get; set; }
 }
 
+/// <summary>One entry in the `/v1/models` data array. Only `id` is load-bearing; the rest exists to match the wire schema.</summary>
 public class ModelEntry
 {
     [JsonPropertyName("id")]
@@ -35,6 +38,7 @@ public class ModelEntry
     public string OwnedBy { get; set; }
 }
 
+/// <summary>Wire shape of an OpenAI-compatible `POST /v1/chat/completions` success response.</summary>
 public class ChatCompletionResponse
 {
     [JsonPropertyName("id")]
@@ -68,6 +72,7 @@ public class ChatResponseMessage
     public string Content { get; set; }
 }
 
+/// <summary>Wire shape of an OpenAI-style error envelope (`{"error":{"message":...}}`), used to extract readable detail from non-success bodies.</summary>
 public class ChatErrorResponse
 {
     [JsonPropertyName("error")]
@@ -82,6 +87,7 @@ public class ChatError
     [JsonPropertyName("type")]
     public string Type { get; set; }
 
+    /// <summary>Typed as string: servers send both string and null codes; a numeric code would be a schema violation worth surfacing as invalid shape.</summary>
     [JsonPropertyName("code")]
     public string Code { get; set; }
 }
