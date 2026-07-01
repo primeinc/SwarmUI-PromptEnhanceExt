@@ -16,7 +16,7 @@ window.PromptEnhance = window.PromptEnhance || {};
 
 PromptEnhance.REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
 
-/** In-memory mirror of the persisted settings. Populated by loadSettings(); defaults match the C# Defaults. */
+/** In-memory mirror of the persisted settings. Populated by peLoadSettings(); defaults match the C# Defaults. */
 PromptEnhance.settings = {
     baseUrl: 'http://localhost:11434',
     model: '',
@@ -39,7 +39,7 @@ function peSetStatus(message, kind) {
 }
 
 /** Loads settings from the backend into PromptEnhance.settings. Resolves even on failure (keeps defaults) so init never blocks. */
-function loadSettings() {
+function peLoadSettings() {
     return new Promise((resolve) => {
         genericRequest('GetPromptEnhanceSettings', {}, (data) => {
             if (data.success && data.settings) {
@@ -74,7 +74,7 @@ function peReadPanelValues() {
 }
 
 /** Saves current panel values. Reports success/failure visibly and updates PromptEnhance.settings only on confirmed save. */
-function saveSettings() {
+function peSaveSettings() {
     const values = peReadPanelValues();
     peSetStatus('Saving…', '');
     return new Promise((resolve) => {
@@ -95,14 +95,14 @@ function saveSettings() {
 }
 
 /** Resets settings to defaults on the backend, then repopulates the panel. */
-function resetSettings() {
+function peResetSettings() {
     peSetStatus('Resetting…', '');
     genericRequest('ResetPromptEnhanceSettings', {}, (data) => {
         if (data.success && data.settings) {
             PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, data.settings);
             pePopulatePanel();
             peSetStatus('Reset to defaults.', 'ok');
-            fetchModels();
+            peFetchModels();
         } else {
             peSetStatus('Reset failed: ' + (data.error || 'unknown error'), 'error');
         }
@@ -112,7 +112,7 @@ function resetSettings() {
 }
 
 /** Fetches the model list from the backend and fills the dropdown. Failure shows an inline option and never wedges. */
-function fetchModels() {
+function peFetchModels() {
     const select = document.getElementById('pe_model_select');
     if (!select) {
         return Promise.resolve();
@@ -238,10 +238,10 @@ function peBuildSettingsPanel() {
     document.body.appendChild(panel);
 
     // Bind handlers ONCE.
-    panel.querySelector('#pe_settings_close').addEventListener('click', closeSettingsPanel);
-    panel.querySelector('#pe_save_btn').addEventListener('click', () => { saveSettings(); });
-    panel.querySelector('#pe_reset_btn').addEventListener('click', () => { resetSettings(); });
-    panel.querySelector('#pe_refresh_models').addEventListener('click', (e) => { e.preventDefault(); fetchModels(); });
+    panel.querySelector('#pe_settings_close').addEventListener('click', peCloseSettingsPanel);
+    panel.querySelector('#pe_save_btn').addEventListener('click', () => { peSaveSettings(); });
+    panel.querySelector('#pe_reset_btn').addEventListener('click', () => { peResetSettings(); });
+    panel.querySelector('#pe_refresh_models').addEventListener('click', (e) => { e.preventDefault(); peFetchModels(); });
     // Close when clicking outside the panel or its trigger button.
     document.addEventListener('click', (e) => {
         if (panel.style.display !== 'block') {
@@ -249,27 +249,27 @@ function peBuildSettingsPanel() {
         }
         const trigger = document.getElementById('pe_settings_button');
         if (!panel.contains(e.target) && trigger && !trigger.contains(e.target)) {
-            closeSettingsPanel();
+            peCloseSettingsPanel();
         }
     });
     return panel;
 }
 
 /** Opens the settings panel: repopulate from PromptEnhance.settings and show. Positioning is left to CSS (fixed). */
-function openSettingsPanel() {
+function peOpenSettingsPanel() {
     const panel = peBuildSettingsPanel();
     pePopulatePanel();
     peSetStatus('', '');
     panel.style.display = 'block';
 }
 
-function closeSettingsPanel() {
+function peCloseSettingsPanel() {
     const panel = document.getElementById('pe_settings_panel');
     if (panel) {
         panel.style.display = 'none';
     }
 }
 
-window.PromptEnhance.loadSettings = loadSettings;
-window.PromptEnhance.fetchModels = fetchModels;
-window.PromptEnhance.openSettingsPanel = openSettingsPanel;
+window.PromptEnhance.loadSettings = peLoadSettings;
+window.PromptEnhance.fetchModels = peFetchModels;
+window.PromptEnhance.openSettingsPanel = peOpenSettingsPanel;

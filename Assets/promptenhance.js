@@ -160,7 +160,7 @@ function peHideRestore() {
 
 // ---- Enhance flow ---------------------------------------------------------------------------------------------
 
-async function handleEnhance() {
+async function peHandleEnhance() {
     if (PromptEnhance.enhancing) {
         return;
     }
@@ -200,7 +200,7 @@ async function handleEnhance() {
 
 // ---- Button bar (built once) ----------------------------------------------------------------------------------
 
-function addPromptButtons() {
+function peAddPromptButtons() {
     const region = document.querySelector('.alt_prompt_region');
     if (!region || document.getElementById('pe_button_bar')) {
         return;
@@ -231,7 +231,7 @@ function addPromptButtons() {
     region.insertBefore(bar, region.firstChild);
 
     // Bind every handler ONCE.
-    bar.querySelector('#pe_enhance_btn').addEventListener('click', handleEnhance);
+    bar.querySelector('#pe_enhance_btn').addEventListener('click', peHandleEnhance);
     bar.querySelector('#pe_settings_button').addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -259,7 +259,7 @@ function addPromptButtons() {
 /** Waits for the Generate-tab prompt region to exist, then builds the button bar. Bounded retry — never spins forever. */
 function peEnsureButtons(attempt = 0) {
     if (document.querySelector('.alt_prompt_region')) {
-        addPromptButtons();
+        peAddPromptButtons();
         return;
     }
     if (attempt < 40) {
