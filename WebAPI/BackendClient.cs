@@ -11,15 +11,8 @@ using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>The single OpenAI-compatible backend client. Owns exactly two transport seams:
-/// <c>GET {base}/v1/models</c> and <c>POST {base}/v1/chat/completions</c>. Every failure is returned as a structured
-/// error payload (never thrown to the UI). The base URL is normalized so users may enter either a server root or a
-/// URL ending in <c>/v1</c>. The route methods resolve settings from the <see cref="Session"/> and probe reachability;
-/// the transport itself lives in <see cref="ExecuteListModels"/> / <see cref="ExecuteChat"/>, which take explicit values
-/// (no Session) so the owned seams and their error taxonomy are integration-testable against a real HTTP server.</summary>
 public class BackendClient
 {
-    // Infinite client timeout; each request supplies its own CancellationTokenSource so the settings timeout is authoritative.
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
     private static HttpClient CreateHttpClient()
@@ -33,14 +26,8 @@ public class BackendClient
     private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
     private static readonly object ReachabilityLock = new();
-    /// <summary>Reachability results keyed by normalized base URL. Same-key re-probes are refreshed in place (see the TTL
-    /// write below), so entries accumulate only across <em>distinct</em> base URLs. The base URL comes from settings as a
-    /// single value, giving an effective cardinality of one, so this cache is intentionally not evicted.</summary>
     private static readonly Dictionary<string, (bool reachable, DateTime whenUtc)> ReachabilityCache = new();
 
-    /// <summary>Normalizes a user-entered base URL to a bare server root: trims whitespace and any trailing slash,
-    /// and strips a trailing <c>/v1</c> so the owned seams resolve cleanly. Returns null when the value is not a valid
-    /// absolute http(s) URL.</summary>
     public static string NormalizeBaseUrl(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -64,8 +51,6 @@ public class BackendClient
 
     private static string ChatUrl(string normalizedBase) => $"{normalizedBase}/v1/chat/completions";
 
-    /// <summary>Fast connectivity probe against the server root, cached (10s success / 30s failure) to avoid hammering a
-    /// dead server. Any HTTP response counts as reachable; only connection failure/timeout counts as unreachable.</summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
         lock (ReachabilityLock)
@@ -99,8 +84,6 @@ public class BackendClient
         return reachable;
     }
 
-    /// <summary>Resolves the current settings and the normalized base URL, returning a ready-to-use tuple or a
-    /// structured error payload via <paramref name="setError"/>.</summary>
     private static async Task<(JObject settings, string normalizedBase)> ResolveConfig(Session session, Action<JObject> setError)
     {
         JObject settingsResponse = await SessionSettings.GetPromptEnhanceSettings(session);
@@ -119,8 +102,6 @@ public class BackendClient
         return (settings, normalizedBase);
     }
 
-    /// <summary>API route: list models from <c>GET {base}/v1/models</c>. Resolves settings + probes reachability, then
-    /// delegates the transport to <see cref="ExecuteListModels"/>.</summary>
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
@@ -137,10 +118,6 @@ public class BackendClient
         return await ExecuteListModels(normalizedBase, timeoutSec);
     }
 
-    /// <summary>Transport seam for <c>GET {normalizedBase}/v1/models</c>: performs the real HTTP request under a
-    /// per-request timeout and maps every outcome to a structured payload — success (parsed model list), non-success
-    /// HTTP (categorized), unparseable body (<see cref="PromptEnhanceErrorCategory.InvalidResponseShape"/>), timeout,
-    /// connection failure (<see cref="PromptEnhanceErrorCategory.ServerUnavailable"/>). Never throws to the caller.</summary>
     public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec)
     {
         try
@@ -175,10 +152,6 @@ public class BackendClient
         }
     }
 
-    /// <summary>API route: enhance a prompt via <c>POST {base}/v1/chat/completions</c>.
-    /// Input: <c>{ "prompt": string, "media": [ { "type", "data", "mediaType" } ] (optional) }</c>.
-    /// The model, system prompt, temperature, max tokens, and timeout all come from settings (single source of truth).
-    /// Resolves settings + probes reachability, then delegates the transport to <see cref="ExecuteChat"/>.</summary>
     public static async Task<JObject> PromptEnhanceRun(JObject rawInput, Session session)
     {
         string userText = rawInput?["prompt"]?.ToString();
@@ -217,11 +190,6 @@ public class BackendClient
         return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec);
     }
 
-    /// <summary>Transport seam for <c>POST {normalizedBase}/v1/chat/completions</c>: builds the OpenAI-shaped request,
-    /// performs the real HTTP request under a per-request timeout, and maps every outcome to a structured payload —
-    /// success (extracted content), non-success HTTP (categorized; an image-blaming 400 with media attached →
-    /// <see cref="PromptEnhanceErrorCategory.UnsupportedImage"/>), unparseable body
-    /// (<see cref="PromptEnhanceErrorCategory.InvalidResponseShape"/>), timeout, connection failure. Never throws.</summary>
     public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec)
     {
         object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
@@ -237,8 +205,6 @@ public class BackendClient
             string body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                // A 400 with an image attached is "unsupported image" only when the backend error body actually blames
-                // the image; a bare 400 is far more often an ordinary bad request and must not be mislabeled.
                 PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
                     ? PromptEnhanceErrorCategory.UnsupportedImage
                     : ErrorHandler.CategorizeHttpStatus(response.StatusCode);
@@ -266,10 +232,6 @@ public class BackendClient
         }
     }
 
-    /// <summary>Parses the optional <c>media</c> array into image parts. A present-but-malformed entry (missing or
-    /// blank <c>data</c>) throws <see cref="ArgumentException"/> rather than being silently dropped, so the caller can
-    /// surface a categorized error instead of downgrading to a text-only request behind the user's back. A null array
-    /// (no image requested) is not a failure and returns an empty list.</summary>
     public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
     {
         List<BackendSchema.MediaContent> result = [];

@@ -1,22 +1,9 @@
-/**
- * settings.js
- * PromptEnhance configuration: the single source of truth on the client side, plus the compact settings panel.
- *
- * Contract:
- *  - One flat settings object mirrors the C# schema exactly:
- *      baseUrl, model, timeoutSeconds, systemPrompt, temperature, maxTokens, sendSelectedImage, replaceMode
- *  - Handlers are bound exactly once (panel DOM is built one time; opening only repopulates + shows it).
- *  - Saving reports success and failure visibly — it never fails silently.
- *  - Model fetch failure shows an inline status and never wedges the Generate tab.
- */
-
 'use strict';
 
 window.PromptEnhance = window.PromptEnhance || {};
 
 PromptEnhance.REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
 
-/** In-memory mirror of the persisted settings. Populated by peLoadSettings(); defaults match the C# Defaults. */
 PromptEnhance.settings = {
     baseUrl: 'http://localhost:11434',
     model: '',
@@ -28,7 +15,6 @@ PromptEnhance.settings = {
     replaceMode: 'preview'
 };
 
-/** Small helper: a status line writer that is safe to call before the panel exists. */
 function peSetStatus(message, kind) {
     const el = document.getElementById('pe_settings_status');
     if (!el) {
@@ -38,7 +24,6 @@ function peSetStatus(message, kind) {
     el.className = 'pe-settings-status' + (kind ? ' ' + kind : '');
 }
 
-/** Loads settings from the backend into PromptEnhance.settings. Resolves even on failure (keeps defaults) so init never blocks. */
 function peLoadSettings() {
     return new Promise((resolve) => {
         genericRequest('GetPromptEnhanceSettings', {}, (data) => {
@@ -55,7 +40,6 @@ function peLoadSettings() {
     });
 }
 
-/** Reads the panel fields into a settings object (used on save). */
 function peReadPanelValues() {
     const num = (id, fallback) => {
         const v = parseFloat(document.getElementById(id)?.value);
@@ -73,7 +57,6 @@ function peReadPanelValues() {
     };
 }
 
-/** Saves current panel values. Reports success/failure visibly and updates PromptEnhance.settings only on confirmed save. */
 function peSaveSettings() {
     const values = peReadPanelValues();
     peSetStatus('Saving…', '');
@@ -94,7 +77,6 @@ function peSaveSettings() {
     });
 }
 
-/** Resets settings to defaults on the backend, then repopulates the panel. */
 function peResetSettings() {
     peSetStatus('Resetting…', '');
     genericRequest('ResetPromptEnhanceSettings', {}, (data) => {
@@ -111,7 +93,6 @@ function peResetSettings() {
     });
 }
 
-/** Fetches the model list from the backend and fills the dropdown. Failure shows an inline option and never wedges. */
 function peFetchModels() {
     const select = document.getElementById('pe_model_select');
     if (!select) {
@@ -152,7 +133,6 @@ function peFetchModels() {
     });
 }
 
-/** Writes PromptEnhance.settings into the panel fields. */
 function pePopulatePanel() {
     const set = (id, value) => { const el = document.getElementById(id); if (el) { el.value = value; } };
     set('pe_base_url', PromptEnhance.settings.baseUrl ?? '');
@@ -171,10 +151,6 @@ function pePopulatePanel() {
     }
 }
 
-/**
- * Builds the settings panel DOM exactly once and binds every handler once.
- * Returns the panel element. Subsequent opens only repopulate and toggle visibility — no rebinding.
- */
 function peBuildSettingsPanel() {
     let panel = document.getElementById('pe_settings_panel');
     if (panel) {
@@ -237,12 +213,10 @@ function peBuildSettingsPanel() {
     `;
     document.body.appendChild(panel);
 
-    // Bind handlers ONCE.
     panel.querySelector('#pe_settings_close').addEventListener('click', peCloseSettingsPanel);
     panel.querySelector('#pe_save_btn').addEventListener('click', () => { peSaveSettings(); });
     panel.querySelector('#pe_reset_btn').addEventListener('click', () => { peResetSettings(); });
     panel.querySelector('#pe_refresh_models').addEventListener('click', (e) => { e.preventDefault(); peFetchModels(); });
-    // Close when clicking outside the panel or its trigger button.
     document.addEventListener('click', (e) => {
         if (panel.style.display !== 'block') {
             return;
@@ -255,7 +229,6 @@ function peBuildSettingsPanel() {
     return panel;
 }
 
-/** Opens the settings panel: repopulate from PromptEnhance.settings and show. Positioning is left to CSS (fixed). */
 function peOpenSettingsPanel() {
     const panel = peBuildSettingsPanel();
     pePopulatePanel();

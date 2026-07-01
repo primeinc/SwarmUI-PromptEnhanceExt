@@ -1,6 +1,3 @@
-/* PromptEnhance — Generate-tab button bar, loading, preview, and restore.
-   Colors come from SwarmUI theme variables so the UI follows the active theme (extension standard #7). */
-
 .promptenhance.pe-button-bar {
     display: flex;
     align-items: center;
@@ -61,7 +58,6 @@
     background-color: var(--background-soft);
 }
 
-/* Loading dots */
 .pe-loading {
     display: inline-flex;
     align-items: center;
@@ -85,7 +81,6 @@
     40% { transform: scale(1); opacity: 1; }
 }
 
-/* Preview box (preview apply-mode) */
 .promptenhance.pe-preview {
     margin: 0.35rem 0;
     padding: 0.6rem;

@@ -1,30 +1,15 @@
-/**
- * promptenhance.js
- * The Generate-tab surface: one Enhance button, one Settings button, and a reversible prompt-application policy.
- *
- * Contract:
- *  - Read #alt_prompt_textbox; optionally attach the selected image when sendSelectedImage is on.
- *  - Call the backend; show a loading state that ALWAYS clears (success, failure, timeout, invalid JSON, refused).
- *  - Apply the result per replaceMode, and NEVER destroy the original prompt without a recovery path:
- *      preview              -> show Apply/Cancel; nothing changes until Apply.
- *      append               -> append below the original with a separator; original stays inline.
- *      replace_with_restore -> stash original, replace, and expose a visible "Restore Previous Prompt" button.
- *  - Handlers are bound exactly once.
- */
-
 'use strict';
 
 window.PromptEnhance = window.PromptEnhance || {};
 PromptEnhance.initialized = false;
 PromptEnhance.enhancing = false;
-PromptEnhance.lastOriginal = null;      // stash for replace_with_restore
-PromptEnhance.pending = null;           // { original, enhanced } while a preview is open
+PromptEnhance.lastOriginal = null;
+PromptEnhance.pending = null;
 
 function pePromptBox() {
     return document.getElementById('alt_prompt_textbox');
 }
 
-/** Sets the prompt text and notifies SwarmUI. Only ever called through a mode that preserves a recovery path. */
 function peSetPrompt(text) {
     const box = pePromptBox();
     if (!box) {
@@ -37,7 +22,6 @@ function peSetPrompt(text) {
     box.focus();
 }
 
-/** Toggles the Enhance button's loading state. Safe to call repeatedly; always call the false branch in finally. */
 function peSetLoading(on) {
     const btn = document.getElementById('pe_enhance_btn');
     const spinner = document.getElementById('pe_enhance_loading');
@@ -50,19 +34,17 @@ function peSetLoading(on) {
     }
 }
 
-/** Surfaces an error using SwarmUI's toast if present, else falls back to alert. Never throws. */
 function peShowError(message) {
     try {
         if (typeof showError === 'function') {
             showError(message);
             return;
         }
-    } catch (_) { /* fall through */ }
+    } catch (_) { }
     console.error('[PromptEnhance]', message);
     alert(message);
 }
 
-/** Collects the currently selected/current image as base64. Returns null when no image is selected; throws when an image IS present but cannot be read, so the caller surfaces an error instead of silently downgrading to a text-only request. */
 async function peGetSelectedImage() {
     const img = document.querySelector('#current_image img.current-image-img')
         || document.querySelector('#current_image img');
@@ -93,7 +75,6 @@ async function peGetSelectedImage() {
     }
 }
 
-/** Wraps the enhance API call in a promise. The backend always returns { success, response|error, errorCategory }. */
 function peEnhanceRequest(payload) {
     return new Promise((resolve) => {
         genericRequest('PromptEnhanceRun', payload,
@@ -104,7 +85,6 @@ function peEnhanceRequest(payload) {
     });
 }
 
-/** Applies the enhanced text according to the configured replaceMode, always preserving a recovery path. */
 function peApplyEnhancement(original, enhanced) {
     const mode = PromptEnhance.settings?.replaceMode || 'preview';
     if (mode === 'append') {
@@ -120,11 +100,8 @@ function peApplyEnhancement(original, enhanced) {
         peShowRestore();
         return;
     }
-    // Default: preview — do not mutate until the user hits Apply.
     peShowPreview(original, enhanced);
 }
-
-// ---- Preview UI -----------------------------------------------------------------------------------------------
 
 function peShowPreview(original, enhanced) {
     PromptEnhance.pending = { original, enhanced };
@@ -144,8 +121,6 @@ function peHidePreview() {
     }
 }
 
-// ---- Restore UI (replace_with_restore) ------------------------------------------------------------------------
-
 function peShowRestore() {
     const btn = document.getElementById('pe_restore_btn');
     if (btn) {
@@ -159,8 +134,6 @@ function peHideRestore() {
         btn.style.display = 'none';
     }
 }
-
-// ---- Enhance flow ---------------------------------------------------------------------------------------------
 
 async function peHandleEnhance() {
     if (PromptEnhance.enhancing) {
@@ -200,8 +173,6 @@ async function peHandleEnhance() {
     }
 }
 
-// ---- Button bar (built once) ----------------------------------------------------------------------------------
-
 function peAddPromptButtons() {
     const region = document.querySelector('.alt_prompt_region');
     if (!region || document.getElementById('pe_button_bar')) {
@@ -232,7 +203,6 @@ function peAddPromptButtons() {
     region.insertBefore(preview, region.firstChild);
     region.insertBefore(bar, region.firstChild);
 
-    // Bind every handler ONCE.
     bar.querySelector('#pe_enhance_btn').addEventListener('click', peHandleEnhance);
     bar.querySelector('#pe_settings_button').addEventListener('click', (e) => {
         e.preventDefault();
@@ -248,8 +218,6 @@ function peAddPromptButtons() {
     });
     preview.querySelector('#pe_preview_apply').addEventListener('click', () => {
         if (PromptEnhance.pending) {
-            // Applying from preview keeps a recovery path: stash the earliest original (never overwrite it on a
-            // second enhance, so Restore always returns the true original, not an intermediate) and offer Restore.
             if (PromptEnhance.lastOriginal === null) {
                 PromptEnhance.lastOriginal = PromptEnhance.pending.original;
             }
@@ -261,7 +229,6 @@ function peAddPromptButtons() {
     preview.querySelector('#pe_preview_cancel').addEventListener('click', peHidePreview);
 }
 
-/** Waits for the Generate-tab prompt region to exist, then builds the button bar. Bounded retry — never spins forever. */
 function peEnsureButtons(attempt = 0) {
     if (document.querySelector('.alt_prompt_region')) {
         peAddPromptButtons();
@@ -284,9 +251,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
         console.error('[PromptEnhance] settings load failed (continuing):', err);
     }
-    // Buttons appear regardless of backend state — a down backend must never hide the UI.
     peEnsureButtons();
-    // Fire-and-forget model fetch; failure shows in the settings panel and never wedges the tab.
     try {
         PromptEnhance.fetchModels?.();
     } catch (err) {

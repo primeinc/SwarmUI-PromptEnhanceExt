@@ -18,8 +18,6 @@
     </PackageReference>
   </ItemGroup>
 
-  <!-- Reference the SwarmUI host (so the extension's SwarmUI-coupled types resolve) and the extension itself.
-       Paths resolve when the extension is checked out at SwarmUI/src/Extensions/<extension>/, the standard layout. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\SwarmUI.csproj">
       <Properties>_EnableMacOSCodeSign=false;StaticWebAssetsEnabled=false</Properties>

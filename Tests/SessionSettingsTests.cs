@@ -2,10 +2,6 @@ using Newtonsoft.Json.Linq;
 
 namespace PromptEnhance.Tests;
 
-/// <summary>Covers <see cref="PromptEnhance.WebAPI.SessionSettings.ValidateSettings"/> — the server-side guard that
-/// rejects out-of-range or wrong-typed settings before they are persisted. Without it a stored <c>timeoutSeconds:0</c>
-/// makes every request cancel immediately, a negative timeout throws inside the backend client, and a non-numeric
-/// <c>temperature</c> throws when the client reads it. Only keys that are present are validated.</summary>
 public class SessionSettingsTests
 {
     private static JObject Full() => new()
@@ -20,22 +16,16 @@ public class SessionSettingsTests
     [Xunit.Fact]
     public void ValidateSettings_AcceptsAValidObject()
     {
-        // Arrange
         JObject input = Full();
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         Xunit.Assert.Null(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_IgnoresAbsentKeys()
     {
-        // Arrange — a partial save only touches replaceMode; the rest keep their stored/default value.
         JObject input = new() { ["replaceMode"] = "append" };
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         Xunit.Assert.Null(error);
     }
 
@@ -44,24 +34,18 @@ public class SessionSettingsTests
     [Xunit.InlineData(-5)]
     public void ValidateSettings_RejectsNonPositiveTimeout(int timeout)
     {
-        // Arrange
         JObject input = Full();
         input["timeoutSeconds"] = timeout;
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsNonNumericTemperature()
     {
-        // Arrange — the exact shape that throws Value<double?>() inside the backend client (BackendClient.cs:189).
         JObject input = Full();
         input["temperature"] = "abc";
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
@@ -70,73 +54,54 @@ public class SessionSettingsTests
     [Xunit.InlineData(2.1)]
     public void ValidateSettings_RejectsTemperatureOutOfRange(double temperature)
     {
-        // Arrange
         JObject input = Full();
         input["temperature"] = temperature;
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsNonPositiveMaxTokens()
     {
-        // Arrange
         JObject input = Full();
         input["maxTokens"] = 0;
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsTimeoutAboveInt32()
     {
-        // Arrange — a stored value > int.MaxValue would throw OverflowException on Value<int?>() outside the try in
-        // the backend client (an unhandled 500), so the guard must reject it before it is ever persisted.
         JObject input = Full();
         input["timeoutSeconds"] = (long)int.MaxValue + 1;
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsMaxTokensAboveInt32()
     {
-        // Arrange
         JObject input = Full();
         input["maxTokens"] = (long)int.MaxValue + 1;
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsUnknownReplaceMode()
     {
-        // Arrange
         JObject input = Full();
         input["replaceMode"] = "obliterate";
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 
     [Xunit.Fact]
     public void ValidateSettings_RejectsEmptyBaseUrl()
     {
-        // Arrange
         JObject input = Full();
         input["baseUrl"] = "";
-        // Act
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
-        // Assert
         AssertRejected(error);
     }
 

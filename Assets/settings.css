@@ -1,6 +1,3 @@
-/* PromptEnhance — compact settings panel.
-   Theme-variable driven so it follows the active SwarmUI theme (extension standard #7). */
-
 .pe-settings-panel {
     position: fixed;
     top: 50%;

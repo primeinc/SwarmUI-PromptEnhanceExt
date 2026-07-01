@@ -4,20 +4,13 @@ using SwarmUI.Utils;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>The single source of truth for PromptEnhance configuration. All settings live in one flat object,
-/// persisted as JSON under the calling user's own generic-data key <c>promptenhance/config</c> (per-user, so one
-/// user's backend URL / model / prompt never leaks to another).
-/// Load merges stored values over <see cref="Defaults"/> so a newly added field always has a sane default.</summary>
 public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
 
-    /// <summary>The complete default configuration. Every configurable knob appears here exactly once.</summary>
     public static JObject Defaults => new()
     {
-        // Base URL of the OpenAI-compatible server. Either a server root or a URL ending in /v1 is accepted;
-        // the backend client normalizes it so the owned seams resolve to {base}/v1/models and {base}/v1/chat/completions.
         ["baseUrl"] = "http://localhost:11434",
         ["model"] = "",
         ["timeoutSeconds"] = 60,
@@ -25,19 +18,14 @@ public class SessionSettings
         ["temperature"] = 0.7,
         ["maxTokens"] = 1024,
         ["sendSelectedImage"] = false,
-        // How an enhancement result is applied to the prompt box. One of: preview | append | replace_with_restore.
         ["replaceMode"] = "preview"
     };
 
-    /// <summary>The setting keys that are known/persisted. Anything else in an incoming payload is ignored,
-    /// so the config surface can never silently grow.</summary>
     private static readonly string[] KnownKeys =
     [
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
     ];
 
-    /// <summary>Loads the current settings (defaults overlaid with any stored values). Never throws to the caller —
-    /// returns a structured error payload instead.</summary>
     public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
@@ -64,8 +52,6 @@ public class SessionSettings
         }
     }
 
-    /// <summary>Saves the provided settings (only known keys are persisted). Returns the merged result so the UI can
-    /// confirm exactly what was stored.</summary>
     public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
     {
         try
@@ -110,13 +96,6 @@ public class SessionSettings
         }
     }
 
-    /// <summary>Validates an incoming (possibly partial) settings object before it is persisted. Only keys that are
-    /// present are checked; an absent key keeps its already-valid stored or default value. Returns a structured error
-    /// payload (<c>success:false</c>) describing the first offending field, or null when every present value is
-    /// well-typed and in range. This is the single guard that stops an out-of-range or wrong-typed value (for example
-    /// <c>timeoutSeconds:0</c> which cancels every request immediately, a negative timeout which throws inside the
-    /// backend client's CancellationTokenSource, or a non-numeric temperature which throws when the client reads it)
-    /// from ever being stored.</summary>
     public static JObject ValidateSettings(JObject incoming)
     {
         JToken baseUrl = incoming["baseUrl"];
@@ -168,7 +147,6 @@ public class SessionSettings
         return null;
     }
 
-    /// <summary>Resets settings to <see cref="Defaults"/> and persists them.</summary>
     public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try

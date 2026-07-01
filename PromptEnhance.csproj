@@ -3,9 +3,6 @@
         <AssemblyName>PromptEnhance</AssemblyName>
     </PropertyGroup>
     <Import Project="../../SwarmUI.extension.props" />
-    <!-- The xUnit test project under Tests/ is built and run separately via `dotnet test`. Exclude it from the
-         extension assembly's compile so the extension builds standalone inside SwarmUI without the test framework
-         on its reference path (matches the SwarmUI-Quarry reference extension). -->
     <ItemGroup>
         <Compile Remove="Tests/**/*.cs" />
     </ItemGroup>

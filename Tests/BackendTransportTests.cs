@@ -6,12 +6,6 @@ using Newtonsoft.Json.Linq;
 
 namespace PromptEnhance.Tests;
 
-/// <summary>Integration tests for the owned transport seams <see cref="PromptEnhance.WebAPI.BackendClient.ExecuteListModels"/>
-/// and <see cref="PromptEnhance.WebAPI.BackendClient.ExecuteChat"/> against a REAL local HTTP server (a raw
-/// <see cref="TcpListener"/> mock — no framework boot, no admin URL-ACL). These exercise the actual
-/// <c>HttpClient</c> round-trip and prove the error taxonomy is owned at the wire: a real 404/500/401 response, a real
-/// malformed body, a real connection refusal, and a real per-request timeout each map to the classified recoverable
-/// state the UI switches on — not an unhandled throw, silent downgrade, or spinner purgatory.</summary>
 public class BackendTransportTests
 {
     private const string ModelsBody = "{\"object\":\"list\",\"data\":[{\"id\":\"mock-enhancer\",\"object\":\"model\"}]}";
@@ -116,10 +110,6 @@ public class BackendTransportTests
     }
 }
 
-/// <summary>A minimal single-response HTTP/1.1 server over a raw <see cref="TcpListener"/> bound to an ephemeral
-/// loopback port. Reads the request (headers + any body) so the client's write completes, optionally delays (to force a
-/// client-side timeout), then writes the configured status line and JSON body. No HttpListener URL-ACL and no admin
-/// needed.</summary>
 internal sealed class MockHttpServer : IDisposable
 {
     private readonly TcpListener _listener;
