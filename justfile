@@ -48,6 +48,37 @@ vendor-sync:
   git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
   git -C vendor/SwarmUI rev-parse HEAD
 
+# Make the vendored host a runnable dev install: seed Data/Settings.fds (skips the
+# installer; SwarmUI docs/Troubleshooting.md documents the IsInstalled key) and copy
+# this extension into the host's src/Extensions (the host only loads extensions from
+# there, and deletes bin/obj inside the folder on boot — a copy, never a junction).
+[windows]
+vendor-dev: vendor-sync
+  if (-not (Test-Path 'vendor/SwarmUI/Data')) { New-Item -ItemType Directory -Force 'vendor/SwarmUI/Data' | Out-Null }
+  if (-not (Test-Path 'vendor/SwarmUI/Data/Settings.fds')) { Copy-Item 'scripts/vendor-dev-settings.fds' 'vendor/SwarmUI/Data/Settings.fds' }
+  robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
+
+# Make the vendored host a runnable dev install (see the [windows] variant for why a copy)
+[unix]
+vendor-dev: vendor-sync
+  mkdir -p vendor/SwarmUI/Data
+  if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
+  rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
+
+# Live host boot gate: SwarmUI's own CI test mode (--ci_test) boots the real host,
+# dotnet-builds and loads this extension through the real lifecycle, self-shuts after
+# ~3s, and exits nonzero if anything logged an error. Port 7899 avoids a running Swarm.
+[windows]
+vendor-ci-test: vendor-dev
+  dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
+  Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port 7899; $code = $LASTEXITCODE; Pop-Location; exit $code
+
+# Live host boot gate (see the [windows] variant for details)
+[unix]
+vendor-ci-test: vendor-dev
+  dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
+  cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port 7899
+
 # Build extension C# project
 backend-build:
   dotnet build {{backend_project}} -v minimal --nologo

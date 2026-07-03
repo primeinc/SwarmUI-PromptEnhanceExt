@@ -73,6 +73,8 @@ dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite against the r
 
 Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
 
+Two more standalone-workspace recipes make the vendored host a runnable dev install: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` (skips SwarmUI's first-run installer) and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` then boots the real host with SwarmUI's own `--ci_test` mode — the extension is built and loaded through the real lifecycle, and any logged error fails the gate with a nonzero exit.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
