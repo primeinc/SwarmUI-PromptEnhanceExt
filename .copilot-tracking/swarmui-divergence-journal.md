@@ -1,9 +1,10 @@
 # SwarmUI Docs ↔ Codebase Divergence Journal
 
-Evidence base: SwarmUI checkout at `../refs/mcmonkeyprojects/SwarmUI` pinned to
-`9c81c1cbcb5f256508e186fd3b4faa873c139b7d` — the exact ref `.github/workflows/gates.yml`
-builds and `justfile` (`swarmui_pin`) vendors. Every claim below cites `path:line` in that
-checkout or in this repo. Re-verify all rows when the pin is bumped.
+Evidence base: a SwarmUI checkout pinned to `9c81c1cbcb5f256508e186fd3b4faa873c139b7d` —
+the exact ref `.github/workflows/gates.yml` builds and `justfile` (`swarmui_pin`) vendors;
+reproduce it anywhere with `just vendor-sync` (lands at `vendor/SwarmUI`). All SwarmUI
+citations below are `path:line` relative to that repo's root; this-repo citations are
+relative to this repo's root. Re-verify all rows when the pin is bumped.
 
 Legend — **Status**: RESOLVED (evidence-bound, no action) · CONTRADICTED (old claim was
 wrong or is now false) · NOTE (true, monitor on pin bumps).

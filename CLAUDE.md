@@ -15,15 +15,19 @@ Shortcuts: `just check` (parity + both suites), `just dev` (fresh clone setup).
 
 ## Ground truth discipline
 
-- Upstream SwarmUI is the anchor: `../refs/mcmonkeyprojects/SwarmUI`, pinned to the ref in
-  `.github/workflows/gates.yml` (mirrored by `swarmui_pin` in the `justfile` — bump together).
+- Upstream SwarmUI is the anchor. The canonical checkout is `vendor/SwarmUI` at the ref
+  pinned in `.github/workflows/gates.yml` (mirrored by `swarmui_pin` in the `justfile` —
+  bump together). It is gitignored but reproducible on any machine: `just vendor-sync`.
+  A wider local mirror (e.g. `../refs/mcmonkeyprojects/SwarmUI`) may exist on some dev
+  machines; it is a convenience, not a committed dependency — cite paths relative to the
+  SwarmUI repo root so they resolve in either checkout.
 - Before writing code that touches any SwarmUI API, type, or DOM surface, read the
   maintainer's source at that pin and cite `path:line` (JiT discipline — `/jit`). Never code
   SwarmUI behavior from memory or training data.
 - Absence claims ("repo has no X", "upstream has no Y") require a same-tool/same-scope
   positive control first (`/search` discipline): `VALIDATED_EMPTY` or it is unknown.
-- Search bounded paths only. `../refs` as a whole is ~1000 repos — never search its root,
-  and never hand subagents a search surface wider than one repo.
+- Search bounded paths only — one repo at a time. Never hand subagents a search surface
+  wider than one repo, and never search a multi-repo mirror's root.
 - `.copilot-tracking/swarmui-divergence-journal.md` is the doc↔code alignment ledger; every
   row cites `path:line` at the pin.
 
