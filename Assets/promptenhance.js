@@ -268,7 +268,10 @@ function peAddPromptButtons() {
  * SwarmUI renders the Generate tab asynchronously after DOMContentLoaded, so
  * injection polls for `.alt_prompt_region` (every 250ms, up to ~10s) instead
  * of assuming the region exists at script load. Bounded so a non-Generate
- * page (eg the installer) doesn't poll forever.
+ * page (eg the installer) doesn't poll forever. A bounded poll is a deliberate
+ * choice over MutationObserver: the host's own first-party JS uses no
+ * observers anywhere, and a subtree observer on body would fire on every DOM
+ * change of the heavy Generate-tab render for a one-shot lookup.
  */
 function peEnsureButtons(attempt = 0) {
     if (document.querySelector('.alt_prompt_region')) {

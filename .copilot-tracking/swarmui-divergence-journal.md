@@ -90,6 +90,28 @@ tree as it stands; D2, D3, D5 are resolved below with citations.
 - README "Connections" section satisfies Extension Standard #5 (`docs/Making Extensions.md:100-101`).
 - MIT license in code + LICENSE file.
 
+## De-handroll decisions (2026-07-02) — replace-or-justify, each cited
+- **Reachability TTL cache — REPLACED.** The hand-rolled `Dictionary` + lock + timestamp
+  prune in `WebAPI/BackendClient.cs` is now `Microsoft.Extensions.Caching.Memory.MemoryCache`
+  with per-entry absolute expiration (MS Learn "Caching in .NET" / "Cache in-memory in
+  ASP.NET Core": `IMemoryCache` recommended, `AbsoluteExpirationRelativeToNow`, "use
+  expirations to limit cache growth"). Ships in the ASP.NET Core shared framework the
+  `Sdk.Web` csproj already references — no new dependency. Probe behavior re-verified
+  through the public-route socket tests and the live host boot gate.
+- **MockHttpServer (raw TCP, Tests/BackendTransportTests.cs) — KEPT, justified.** MS Learn's
+  recommended in-proc path (`Microsoft.AspNetCore.TestHost` `TestServer` /
+  `WebApplicationFactory`) is "an in-memory test server" that handles requests "without
+  network overhead" — i.e. no sockets. These tests exist to classify socket-level failures
+  (connection refused, header-then-stall timeout, exact malformed bytes), which the
+  vendor-recommended tool cannot exercise by design. A dumb deterministic TCP responder is
+  the fit-for-purpose hostile-server simulator; it is contained test infrastructure covered
+  by 14 green tests.
+- **peEnsureButtons 250ms×40 poll (Frontend/promptenhance.ts) — KEPT, justified.** SwarmUI's
+  first-party JS contains zero `MutationObserver` usage (sole hit in the repo is the bundled
+  third-party `wwwroot/js/lib/select2.min.js`; positive control: same-scope greps hit
+  constantly). The bounded poll matches host idiom, and a `subtree` observer on `body` would
+  fire on every DOM change of the heavy Generate-tab render for a one-shot lookup.
+
 ## Known follow-ups
 - Upstream offers `--ci_test_extensions` + a `ci-test` flag in `launchtools/extension_list.fds`
   (`src/Core/ExtensionsManager.cs:193-196`) — when this extension is PR'd to the extension list,

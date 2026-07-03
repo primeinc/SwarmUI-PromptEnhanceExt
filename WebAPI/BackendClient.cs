@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Backends;
@@ -38,10 +39,14 @@ public class BackendClient
     private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
 
-    /// <summary>Prune horizon for the reachability cache; must stay comfortably above both TTLs so a still-live entry is never evicted.</summary>
-    private static readonly TimeSpan ReachabilityPruneAge = TimeSpan.FromMinutes(5);
-    private static readonly object ReachabilityLock = new();
-    private static readonly Dictionary<string, (bool reachable, DateTime whenUtc)> ReachabilityCache = new();
+    /// <summary>
+    /// TTL cache for probe results — MemoryCache from the ASP.NET Core shared
+    /// framework, with per-entry absolute expiration in place of hand-rolled
+    /// timestamp bookkeeping, locking, and pruning. Keys are normalized base
+    /// URLs from per-user settings (permission-gated, one per user), so
+    /// cardinality stays tiny and every entry self-expires within 30s.
+    /// </summary>
+    private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
 
     /// <summary>
     /// Normalizes a user-entered base URL: trims, strips trailing slashes and
@@ -84,22 +89,14 @@ public class BackendClient
     /// proxy, a cold model scan) must not be reported down when the real
     /// request could still succeed within the user's timeoutSeconds, so the
     /// probe gives up after <see cref="ReachabilityTimeoutSeconds"/> seconds
-    /// and lets the per-request timeout govern. Each insert prunes entries
-    /// older than <see cref="ReachabilityPruneAge"/> so the cache stays
-    /// bounded over the process lifetime.
+    /// and lets the per-request timeout govern. Entry lifetime is enforced by
+    /// MemoryCache's per-entry absolute expiration.
     /// </summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
-        lock (ReachabilityLock)
+        if (ReachabilityCache.TryGetValue(normalizedBase, out bool cached))
         {
-            if (ReachabilityCache.TryGetValue(normalizedBase, out (bool reachable, DateTime whenUtc) cached))
-            {
-                TimeSpan ttl = cached.reachable ? ReachabilityTtlSuccess : ReachabilityTtlFailure;
-                if (DateTime.UtcNow - cached.whenUtc < ttl)
-                {
-                    return cached.reachable;
-                }
-            }
+            return cached;
         }
         bool reachable;
         try
@@ -119,16 +116,7 @@ public class BackendClient
             Logs.Warning($"[PromptEnhance] Backend at {normalizedBase} not reachable: {ex.GetType().Name}");
             reachable = false;
         }
-        lock (ReachabilityLock)
-        {
-            DateTime nowUtc = DateTime.UtcNow;
-            List<string> stale = [.. ReachabilityCache.Where(entry => nowUtc - entry.Value.whenUtc > ReachabilityPruneAge).Select(entry => entry.Key)];
-            foreach (string key in stale)
-            {
-                ReachabilityCache.Remove(key);
-            }
-            ReachabilityCache[normalizedBase] = (reachable, nowUtc);
-        }
+        ReachabilityCache.Set(normalizedBase, reachable, reachable ? ReachabilityTtlSuccess : ReachabilityTtlFailure);
         return reachable;
     }
 
