@@ -87,7 +87,9 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         }
         const resp = (opts.routeResponses && route in opts.routeResponses)
             ? opts.routeResponses[route]
-            : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
+            : route === 'GetPromptEnhanceSettings'
+                ? { success: true, settings: {} }
+                : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
         onSuccess(resp);
     }) as unknown as typeof win.genericRequest;
     if (opts.throwingShowError) {
@@ -285,6 +287,27 @@ test('No bare generic globals leak onto window (must be pe-prefixed / namespaced
         assert.strictEqual((win as unknown as Record<string, unknown>)[generic], undefined, `no bare global '${generic}'`);
     }
     assert.strictEqual(typeof win.PromptEnhance.openSettingsPanel, 'function', 'namespaced API present');
+});
+
+test('Boot is clean: the harness serves a valid settings envelope by default, zero console noise', async () => {
+    const { calls } = await boot({});
+    assert.deepStrictEqual(calls.consoleErrors, [], 'a default boot must produce no console.error output');
+    const loads = calls.genericRequest.filter((c) => c.route === 'GetPromptEnhanceSettings');
+    assert.strictEqual(loads.length, 1, 'boot issues exactly one settings load');
+});
+
+test('Settings load failure degrades to defaults visibly (logged) and Enhance still works', async () => {
+    const { win, calls } = await boot({
+        prompt: 'a cat',
+        routeErrors: { GetPromptEnhanceSettings: new Error('store on fire') }
+    });
+    assert.ok(calls.consoleErrors.some((line) => line.includes('Failed to load settings')), 'the failure is logged, not swallowed');
+    assert.strictEqual(win.PromptEnhance.settings!.baseUrl, 'http://localhost:11434', 'client keeps the defaults after a failed load');
+    win.peAddPromptButtons();
+    await win.peHandleEnhance();
+    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
+    assert.strictEqual(runs.length, 1, 'Enhance must still function on defaults after a failed settings load');
+    assert.strictEqual(calls.showError.length, 0, 'a failed settings load must not surface an error banner on enhance');
 });
 
 test('loadSettings merges server settings over defaults and rejects wrongly typed values', async () => {
