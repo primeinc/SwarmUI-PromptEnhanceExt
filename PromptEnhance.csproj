@@ -24,7 +24,15 @@
     </PropertyGroup>
 
     <ItemGroup Condition="'$(UseVendoredSwarmUI)' == 'true'">
-        <ProjectReference Include="vendor/SwarmUI/src/SwarmUI.csproj" />
+        <!--
+          Properties must stay identical to the SwarmUI reference in
+          Tests/PromptEnhance.Tests.csproj: a ProjectReference with different
+          global properties is a second MSBuild instance of the same project,
+          and two instances race writing src/obj/.../SwarmUI.dll (CS2012).
+        -->
+        <ProjectReference Include="vendor/SwarmUI/src/SwarmUI.csproj">
+            <Properties>_EnableMacOSCodeSign=false;StaticWebAssetsEnabled=false</Properties>
+        </ProjectReference>
     </ItemGroup>
 
     <Import Project="vendor/SwarmUI/src/SwarmUI.deps.props" Condition="'$(UseVendoredSwarmUI)' == 'true' and Exists('vendor/SwarmUI/src/SwarmUI.deps.props')" />

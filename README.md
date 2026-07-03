@@ -57,9 +57,12 @@ No API key or `Authorization` header is sent with any request. Use a server that
 
 ## Development and testing
 
-`scripts/run-tests.sh` is the canonical reproduction of every committed validation gate. It requires `SWARMUI_ROOT` set to a SwarmUI checkout; the extension checkout must live at `<SwarmUI>/src/Extensions/PromptEnhance` because `extension.props` references host files, so the working tree is the build tree.
+Two layouts build and test identically; the C# project picks one automatically (`UseVendoredSwarmUI` in `PromptEnhance.csproj`):
 
-The individual gates, runnable from the extension directory:
+1. **Host layout** — the checkout lives at `<SwarmUI>/src/Extensions/PromptEnhance` and imports SwarmUI's canonical `SwarmUI.extension.props`. `scripts/run-tests.sh` (requires `SWARMUI_ROOT`) reproduces every committed gate in this layout — the working tree is the build tree.
+2. **Standalone workspace** — the checkout lives anywhere, with the SwarmUI host vendored at `./vendor/SwarmUI`, pinned to the same commit CI builds (`swarmui_pin` in the `justfile`, mirrored by the ref in `.github/workflows/gates.yml`). Set up with `just vendor-sync`; the vendored property group in `PromptEnhance.csproj` mirrors `SwarmUI.extension.props` verbatim and must be re-checked when the pin is bumped.
+
+The individual gates, runnable from the extension directory in either layout:
 
 ```sh
 npm ci
@@ -67,6 +70,8 @@ npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Asse
 npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js, real jsdom
 dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite against the real SwarmUI host
 ```
+
+Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
 
 ## License
 

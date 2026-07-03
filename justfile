@@ -12,6 +12,10 @@ alias c := check
 backend_project := "PromptEnhance.csproj"
 backend_test_project := "Tests/PromptEnhance.Tests.csproj"
 
+# Must match the SwarmUI ref pinned in .github/workflows/gates.yml — bump both together.
+swarmui_pin := "9c81c1cbcb5f256508e186fd3b4faa873c139b7d"
+swarmui_url := "https://github.com/mcmonkeyprojects/SwarmUI"
+
 # Install Node dev dependencies
 install:
   npm ci
@@ -27,6 +31,22 @@ frontend-parity:
 # Run frontend tests (jsdom)
 frontend-test:
   npm run test:frontend
+
+# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout)
+[windows]
+vendor-sync:
+  if (-not (Test-Path 'vendor/SwarmUI/.git')) { git init -q vendor/SwarmUI; git -C vendor/SwarmUI remote add origin {{swarmui_url}} }
+  git -C vendor/SwarmUI fetch --depth 1 origin {{swarmui_pin}}
+  git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
+  git -C vendor/SwarmUI rev-parse HEAD
+
+# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout)
+[unix]
+vendor-sync:
+  if [ ! -e vendor/SwarmUI/.git ]; then git init -q vendor/SwarmUI && git -C vendor/SwarmUI remote add origin {{swarmui_url}}; fi
+  git -C vendor/SwarmUI fetch --depth 1 origin {{swarmui_pin}}
+  git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
+  git -C vendor/SwarmUI rev-parse HEAD
 
 # Build extension C# project
 backend-build:
