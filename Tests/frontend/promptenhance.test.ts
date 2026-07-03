@@ -16,6 +16,15 @@ const CONTRACTS_SRC = fs.readFileSync(path.join(ASSETS, 'contracts.js'), 'utf8')
 const SETTINGS_SRC = fs.readFileSync(path.join(ASSETS, 'settings.js'), 'utf8');
 const PROMPT_SRC = fs.readFileSync(path.join(ASSETS, 'promptenhance.js'), 'utf8');
 
+interface PEContractFile {
+    routes: Record<string, string>;
+    errorCategories: string[];
+    store: { dataname: string; name: string };
+    settings: Record<string, { type: string; default: unknown; min?: number; max?: number; enum?: string[] }>;
+}
+const CONTRACT: PEContractFile = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', '..', 'contracts', 'pe-contract.json'), 'utf8'));
+
 const PAGE_HTML = `<!DOCTYPE html><html><body>
   <div class="current_image drag_image_target" id="current_image"></div>
   <div class="alt_prompt_region drag_image_target" id="alt_prompt_region">
@@ -287,6 +296,44 @@ test('No bare generic globals leak onto window (must be pe-prefixed / namespaced
         assert.strictEqual((win as unknown as Record<string, unknown>)[generic], undefined, `no bare global '${generic}'`);
     }
     assert.strictEqual(typeof win.PromptEnhance.openSettingsPanel, 'function', 'namespaced API present');
+});
+
+test('Contract: runtime defaults, routes, and replace modes match contracts/pe-contract.json exactly', async () => {
+    const { win } = await boot({});
+    const expectedDefaults: Record<string, unknown> = {};
+    for (const [key, spec] of Object.entries(CONTRACT.settings)) {
+        expectedDefaults[key] = spec.default;
+    }
+    assert.deepStrictEqual({ ...win.PromptEnhance.settings }, expectedDefaults, 'boot-time settings must equal the contract defaults, key for key');
+    assert.deepStrictEqual({ ...win.PromptEnhance.ROUTES! }, CONTRACT.routes, 'PromptEnhance.ROUTES must equal the contract routes');
+    assert.deepStrictEqual([...win.PromptEnhance.REPLACE_MODES!], CONTRACT.settings['replaceMode']!.enum, 'REPLACE_MODES must equal the contract enum');
+    assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(win.PromptEnhance.LIMITS)),
+        {
+            timeoutSeconds: { min: CONTRACT.settings['timeoutSeconds']!.min, max: CONTRACT.settings['timeoutSeconds']!.max },
+            temperature: { min: CONTRACT.settings['temperature']!.min, max: CONTRACT.settings['temperature']!.max },
+            maxTokens: { min: CONTRACT.settings['maxTokens']!.min }
+        },
+        'PromptEnhance.LIMITS must equal the contract bounds');
+});
+
+test('Contract: panel clamps numeric inputs to the contract bounds on save', async () => {
+    const { win, doc, calls } = await boot({
+        routeResponses: {
+            SavePromptEnhanceSettings: { success: true, settings: {} },
+            PromptEnhanceListModels: { success: true, models: [{ id: 'm' }] }
+        }
+    });
+    win.PromptEnhance.openSettingsPanel!();
+    (doc.getElementById('pe_timeout') as HTMLInputElement).value = '999999';
+    (doc.getElementById('pe_temperature') as HTMLInputElement).value = '9.5';
+    (doc.getElementById('pe_max_tokens') as HTMLInputElement).value = '-5';
+    const ok = await win.peSaveSettings();
+    assert.strictEqual(ok, true, 'save resolves true');
+    const save = calls.genericRequest.filter((c) => c.route === CONTRACT.routes['saveSettings'])[0]!;
+    assert.strictEqual(save.payload.settings!.timeoutSeconds, CONTRACT.settings['timeoutSeconds']!.max, 'timeout clamps to the contract max');
+    assert.strictEqual(save.payload.settings!.temperature, CONTRACT.settings['temperature']!.max, 'temperature clamps to the contract max');
+    assert.strictEqual(save.payload.settings!.maxTokens, CONTRACT.settings['maxTokens']!.min, 'maxTokens clamps to the contract floor');
 });
 
 test('Boot is clean: the harness serves a valid settings envelope by default, zero console noise', async () => {

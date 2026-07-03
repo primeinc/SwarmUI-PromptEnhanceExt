@@ -104,7 +104,7 @@ async function peGetSelectedImage() {
  */
 function peEnhanceRequest(payload) {
     return new Promise((resolve) => {
-        genericRequest('PromptEnhanceRun', payload, (data) => resolve(peAdaptEnhanceResult(data)), 0, (err) => resolve({ ok: false, error: peErrorText(err) }));
+        genericRequest(PE_ROUTES.run, payload, (data) => resolve(peAdaptEnhanceResult(data)), 0, (err) => resolve({ ok: false, error: peErrorText(err) }));
     });
 }
 /**

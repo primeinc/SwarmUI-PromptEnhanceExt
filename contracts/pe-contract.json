@@ -1,0 +1,35 @@
+{
+  "$comment": "Single source of truth for every value shared across the C# backend, the TypeScript frontend, and the tests. Each language keeps exactly one definition site mirroring this file; ContractParityTests (C#) and the jsdom contract tests (TS) fail on any drift. Change values HERE first, then update the mirrors until the gates pass.",
+  "routes": {
+    "listModels": "PromptEnhanceListModels",
+    "run": "PromptEnhanceRun",
+    "getSettings": "GetPromptEnhanceSettings",
+    "saveSettings": "SavePromptEnhanceSettings",
+    "resetSettings": "ResetPromptEnhanceSettings"
+  },
+  "errorCategories": [
+    "server_unavailable",
+    "timeout",
+    "invalid_base_url",
+    "model_missing",
+    "unsupported_image",
+    "invalid_response_shape",
+    "http_error",
+    "authentication",
+    "generic"
+  ],
+  "store": {
+    "dataname": "promptenhance",
+    "name": "config"
+  },
+  "settings": {
+    "baseUrl": { "type": "string", "default": "http://localhost:11434" },
+    "model": { "type": "string", "default": "" },
+    "timeoutSeconds": { "type": "integer", "default": 60, "min": 1, "max": 3600 },
+    "systemPrompt": { "type": "string", "default": "You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation." },
+    "temperature": { "type": "number", "default": 0.7, "min": 0, "max": 2 },
+    "maxTokens": { "type": "integer", "default": 1024, "min": 1, "max": 2147483647 },
+    "sendSelectedImage": { "type": "boolean", "default": false },
+    "replaceMode": { "type": "string", "default": "preview", "enum": ["preview", "append", "replace_with_restore"] }
+  }
+}

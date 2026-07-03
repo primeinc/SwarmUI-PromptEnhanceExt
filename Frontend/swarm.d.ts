@@ -78,6 +78,22 @@ type PEEnhanceResult = { ok: true; response: string } | { ok: false; error: stri
  * Fields are optional because each script bootstraps the namespace
  * defensively and script order is a host concern, not a code assumption.
  */
+/** API route names, mirrored from contracts/pe-contract.json (see contracts.ts). */
+interface PERoutes {
+    readonly listModels: string;
+    readonly run: string;
+    readonly getSettings: string;
+    readonly saveSettings: string;
+    readonly resetSettings: string;
+}
+
+/** Numeric input bounds, mirrored from contracts/pe-contract.json (see contracts.ts). */
+interface PELimits {
+    readonly timeoutSeconds: { readonly min: number; readonly max: number };
+    readonly temperature: { readonly min: number; readonly max: number };
+    readonly maxTokens: { readonly min: number };
+}
+
 interface PromptEnhanceNamespace {
     initialized?: boolean;
     enhancing?: boolean;
@@ -90,6 +106,8 @@ interface PromptEnhanceNamespace {
     pending?: PEPending | null;
     settings?: Partial<PESettings>;
     REPLACE_MODES?: readonly PEReplaceMode[];
+    ROUTES?: PERoutes;
+    LIMITS?: PELimits;
     loadSettings?: () => Promise<void>;
     fetchModels?: () => Promise<void>;
     openSettingsPanel?: () => void;

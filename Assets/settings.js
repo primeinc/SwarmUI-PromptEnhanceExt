@@ -27,7 +27,7 @@ function peSetStatus(message, kind) {
  */
 function peLoadSettings() {
     return new Promise((resolve) => {
-        genericRequest('GetPromptEnhanceSettings', {}, (data) => {
+        genericRequest(PE_ROUTES.getSettings, {}, (data) => {
             const result = peAdaptSettingsResult(data);
             if (result.ok) {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
@@ -45,11 +45,12 @@ function peLoadSettings() {
 /**
  * DOM adapter: reads the panel fields into a full PESettings value.
  * Missing or non-numeric fields fall back to the current effective settings.
- * Mirrored server-side ValidateSettings bounds: timeoutSeconds is clamped to
- * [1, 3600], temperature to [0, 2], and maxTokens to a floor of 1 (its
- * int.MaxValue ceiling is not mirrored). An empty model selection means
- * "keep the current model": the dropdown has no affordance for clearing a
- * model, so an unpopulated or placeholder selection must never erase one.
+ * Numeric clamps come from PE_LIMITS (contracts.ts, mirroring
+ * contracts/pe-contract.json — the same bounds ValidateSettings enforces
+ * server-side; maxTokens' int.MaxValue ceiling is not mirrored). An empty
+ * model selection means "keep the current model": the dropdown has no
+ * affordance for clearing a model, so an unpopulated or placeholder
+ * selection must never erase one.
  */
 function peReadPanelValues() {
     const current = peEffectiveSettings();
@@ -68,10 +69,10 @@ function peReadPanelValues() {
     return {
         baseUrl: text('pe_base_url', current.baseUrl).trim(),
         model: text('pe_model_select', current.model) || current.model,
-        timeoutSeconds: Math.min(3600, Math.max(1, Math.round(num('pe_timeout', current.timeoutSeconds)))),
+        timeoutSeconds: Math.min(PE_LIMITS.timeoutSeconds.max, Math.max(PE_LIMITS.timeoutSeconds.min, Math.round(num('pe_timeout', current.timeoutSeconds)))),
         systemPrompt: text('pe_system_prompt', current.systemPrompt),
-        temperature: Math.min(2, Math.max(0, num('pe_temperature', current.temperature))),
-        maxTokens: Math.max(1, Math.round(num('pe_max_tokens', current.maxTokens))),
+        temperature: Math.min(PE_LIMITS.temperature.max, Math.max(PE_LIMITS.temperature.min, num('pe_temperature', current.temperature))),
+        maxTokens: Math.max(PE_LIMITS.maxTokens.min, Math.round(num('pe_max_tokens', current.maxTokens))),
         sendSelectedImage: sendImage ? sendImage.checked : current.sendSelectedImage,
         replaceMode: replaceMode
     };
@@ -81,7 +82,7 @@ function peSaveSettings() {
     const values = peReadPanelValues();
     peSetStatus('Saving…', '');
     return new Promise((resolve) => {
-        genericRequest('SavePromptEnhanceSettings', { settings: values }, (data) => {
+        genericRequest(PE_ROUTES.saveSettings, { settings: values }, (data) => {
             const result = peAdaptSettingsResult(data);
             if (result.ok) {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
@@ -102,7 +103,7 @@ function peSaveSettings() {
 function peResetSettings() {
     peSetStatus('Resetting…', '');
     return new Promise((resolve) => {
-        genericRequest('ResetPromptEnhanceSettings', {}, (data) => {
+        genericRequest(PE_ROUTES.resetSettings, {}, (data) => {
             const result = peAdaptSettingsResult(data);
             if (result.ok) {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
@@ -136,7 +137,7 @@ function peFetchModels() {
     select.add(new Option('Loading models…', ''));
     peSetStatus('Fetching models…', '');
     return new Promise((resolve) => {
-        genericRequest('PromptEnhanceListModels', {}, (data) => {
+        genericRequest(PE_ROUTES.listModels, {}, (data) => {
             const result = peAdaptModelsResult(data);
             select.innerHTML = '';
             if (result.ok) {
@@ -222,15 +223,15 @@ function peBuildSettingsPanel() {
             <div class="pe-field-row">
                 <div class="pe-field-col">
                     <label for="pe_temperature">Temperature</label>
-                    <input type="number" id="pe_temperature" min="0" max="2" step="0.05">
+                    <input type="number" id="pe_temperature" min="${PE_LIMITS.temperature.min}" max="${PE_LIMITS.temperature.max}" step="0.05">
                 </div>
                 <div class="pe-field-col">
                     <label for="pe_max_tokens">Max Tokens</label>
-                    <input type="number" id="pe_max_tokens" min="1" step="1">
+                    <input type="number" id="pe_max_tokens" min="${PE_LIMITS.maxTokens.min}" step="1">
                 </div>
                 <div class="pe-field-col">
                     <label for="pe_timeout">Timeout (s)</label>
-                    <input type="number" id="pe_timeout" min="1" max="3600" step="1">
+                    <input type="number" id="pe_timeout" min="${PE_LIMITS.timeoutSeconds.min}" max="${PE_LIMITS.timeoutSeconds.max}" step="1">
                 </div>
             </div>
 

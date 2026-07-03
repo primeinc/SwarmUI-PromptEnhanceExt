@@ -15,9 +15,34 @@ window.PromptEnhance = window.PromptEnhance || {};
 PromptEnhance.REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
 
 /**
- * Client-side mirror of SessionSettings.Defaults (WebAPI/SessionSettings.cs).
- * SettingsDefaultsParityTests pins the systemPrompt text verbatim against the
- * server default; if you change one side, the committed gate fails.
+ * Mirrors of contracts/pe-contract.json (the single source of truth shared
+ * with the C# backend). The jsdom contract tests fail if these drift from
+ * the JSON; ContractParityTests pins the C# side to the same file. These are
+ * the ONLY definition sites in the frontend — route names and numeric bounds
+ * must be referenced from here, never re-typed as literals.
+ */
+const PE_ROUTES: PERoutes = {
+    listModels: 'PromptEnhanceListModels',
+    run: 'PromptEnhanceRun',
+    getSettings: 'GetPromptEnhanceSettings',
+    saveSettings: 'SavePromptEnhanceSettings',
+    resetSettings: 'ResetPromptEnhanceSettings'
+};
+
+const PE_LIMITS: PELimits = {
+    timeoutSeconds: { min: 1, max: 3600 },
+    temperature: { min: 0, max: 2 },
+    maxTokens: { min: 1 }
+};
+
+PromptEnhance.ROUTES = PE_ROUTES;
+PromptEnhance.LIMITS = PE_LIMITS;
+
+/**
+ * Client-side mirror of the defaults in contracts/pe-contract.json (also
+ * mirrored by SessionSettings.Defaults in WebAPI/SessionSettings.cs).
+ * ContractParityTests (C#) and the jsdom contract test pin both mirrors to
+ * the JSON; change the contract first, then the mirrors, or the gates fail.
  */
 const PE_DEFAULT_SETTINGS: PESettings = {
     baseUrl: 'http://localhost:11434',
