@@ -19,7 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\vendor\SwarmUI\src\SwarmUI.csproj" Condition="Exists('..\vendor\SwarmUI\src\SwarmUI.csproj')">
+    <!-- Mutually exclusive with the host-layout reference below: in a host checkout
+         that also ran vendor-sync, both paths exist, and referencing two SwarmUI
+         projects would produce duplicate type identities. Host layout wins,
+         mirroring the UseVendoredSwarmUI condition in ../PromptEnhance.csproj. -->
+    <ProjectReference Include="..\vendor\SwarmUI\src\SwarmUI.csproj" Condition="Exists('..\vendor\SwarmUI\src\SwarmUI.csproj') and !Exists('..\..\..\SwarmUI.csproj')">
       <Properties>_EnableMacOSCodeSign=false;StaticWebAssetsEnabled=false</Properties>
     </ProjectReference>
     <ProjectReference Include="..\..\..\SwarmUI.csproj" Condition="Exists('..\..\..\SwarmUI.csproj')">

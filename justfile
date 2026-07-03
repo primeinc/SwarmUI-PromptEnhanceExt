@@ -32,17 +32,21 @@ frontend-parity:
 frontend-test:
   npm run test:frontend
 
-# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout)
+# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout).
+# Refuses symlinked vendor paths: older layouts linked vendor into a sibling project, and
+# checkout/robocopy through the link would mutate that other repo's working tree.
 [windows]
 vendor-sync:
+  if ((Get-Item 'vendor' -Force -ErrorAction SilentlyContinue).LinkType -or (Get-Item 'vendor/SwarmUI' -Force -ErrorAction SilentlyContinue).LinkType) { Write-Error 'vendor or vendor/SwarmUI is a symlink/junction - refusing to touch it. Delete the link and re-run.'; exit 1 }
   if (-not (Test-Path 'vendor/SwarmUI/.git')) { git init -q vendor/SwarmUI; git -C vendor/SwarmUI remote add origin {{swarmui_url}} }
   git -C vendor/SwarmUI fetch --depth 1 origin {{swarmui_pin}}
   git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
   git -C vendor/SwarmUI rev-parse HEAD
 
-# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout)
+# Pin ./vendor/SwarmUI to the exact commit CI builds against (see the [windows] variant)
 [unix]
 vendor-sync:
+  if [ -L vendor ] || [ -L vendor/SwarmUI ]; then echo 'vendor or vendor/SwarmUI is a symlink - refusing to touch it. Delete the link and re-run.' >&2; exit 1; fi
   if [ ! -e vendor/SwarmUI/.git ]; then git init -q vendor/SwarmUI && git -C vendor/SwarmUI remote add origin {{swarmui_url}}; fi
   git -C vendor/SwarmUI fetch --depth 1 origin {{swarmui_pin}}
   git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
@@ -69,15 +73,15 @@ vendor-dev: vendor-sync
 # dotnet-builds and loads this extension through the real lifecycle, self-shuts after
 # ~3s, and exits nonzero if anything logged an error. Port 7899 avoids a running Swarm.
 [windows]
-vendor-ci-test: vendor-dev
+vendor-ci-test port='7899': vendor-dev
   dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
-  Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port 7899; $code = $LASTEXITCODE; Pop-Location; exit $code
+  Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{port}}; $code = $LASTEXITCODE; Pop-Location; exit $code
 
 # Live host boot gate (see the [windows] variant for details)
 [unix]
-vendor-ci-test: vendor-dev
+vendor-ci-test port='7899': vendor-dev
   dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
-  cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port 7899
+  cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{port}}
 
 # Build extension C# project
 backend-build:

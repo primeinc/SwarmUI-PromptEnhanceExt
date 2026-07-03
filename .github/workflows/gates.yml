@@ -7,11 +7,14 @@
 # bump the ref deliberately when adopting a newer host.
 name: gates
 
-# Push runs on every branch: work-in-progress branches must get the same gates
-# as master, or "gates passed" claims on a branch are local-only. pull_request
-# stays for fork PRs; the concurrency group cancels superseded runs per ref.
+# Push runs on every branch (not tags): work-in-progress branches must get the
+# same gates as master, or "gates passed" claims on a branch are local-only.
+# pull_request covers fork PRs only — same-repo PRs already ran on push, and the
+# job-level fork guard prevents the duplicate. cancel-in-progress is disabled on
+# master so every merged commit keeps its own gate verdict.
 on:
   push:
+    branches: ['**']
   pull_request:
 
 permissions:
@@ -19,11 +22,12 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +39,7 @@ jobs:
 
   csharp:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,3 +54,20 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet build SwarmUI/src/SwarmUI.csproj -c Release -o SwarmUI/src/bin/live_release
       - run: dotnet test SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug
+
+  # The vendored (standalone-workspace) build graph — the layout the csproj race
+  # fix exists for — must also be exercised in CI, not only on dev machines.
+  csharp-vendored:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: mcmonkeyprojects/SwarmUI
+          ref: 9c81c1cbcb5f256508e186fd3b4faa873c139b7d
+          path: vendor/SwarmUI
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet test Tests/PromptEnhance.Tests.csproj -c Debug

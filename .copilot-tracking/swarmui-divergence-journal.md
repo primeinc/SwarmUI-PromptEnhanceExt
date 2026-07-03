@@ -112,6 +112,21 @@ tree as it stands; D2, D3, D5 are resolved below with citations.
   constantly). The bounded poll matches host idiom, and a `subtree` observer on `body` would
   fire on every DOM change of the heavy Generate-tab render for a one-shot lookup.
 
+## Adversarial audit disposition (2026-07-02)
+An adversarial oracle pass over the branch produced 14 findings; the high/medium ones are
+fixed and gated (corrupt-store blob backup + recovered envelope flag; symlink guards on
+vendor recipes; csproj Properties parity pin + a vendored CI leg; mutually exclusive
+SwarmUI references in the Tests csproj; panel apply-mode options derived from the contract
+enum; per-type and entry-wise contract pins; CI duplicate-run/tag/master-cancel fixes).
+Deliberately left, with reasons: the emitted-JS substring pins stay (redundant safety over
+the jsdom deep-equals + parity gate, not the load-bearing check); the registry-equality
+filter keys on the "promptenhance" substring (all contract routes contain it — new routes
+that don't would be a naming-convention break first); the vendor-dev settings seed is
+copy-if-absent by design (an existing dev install's edited settings must not be clobbered);
+the reachability TTL values (10s/30s) stay unpinned — MemoryCacheOptions offers a clock
+seam, but pinning tuning values that are not contract buys nothing (recorded in
+Tests/BackendTransportTests.cs).
+
 ## Known follow-ups
 - Upstream offers `--ci_test_extensions` + a `ci-test` flag in `launchtools/extension_list.fds`
   (`src/Core/ExtensionsManager.cs:193-196`) — when this extension is PR'd to the extension list,

@@ -232,17 +232,19 @@ public class SessionSettingsTests
     }
 
     [Xunit.Fact]
-    public async Task GetPromptEnhanceSettings_WithCorruptStoredData_DegradesToDefaults()
+    public async Task GetPromptEnhanceSettings_WithCorruptStoredData_DegradesToDefaults_FlagsAndBacksUp()
     {
         Session session = MakeRealSession();
         session.User.SaveGenericData("promptenhance", "config", "{ this is not json");
         JObject result = await WebAPI.SessionSettings.GetPromptEnhanceSettings(session);
         Xunit.Assert.True(result["success"]!.Value<bool>());
         Xunit.Assert.Equal("http://localhost:11434", result["settings"]!["baseUrl"]!.Value<string>());
+        Xunit.Assert.True(result["recovered"]!.Value<bool>(), "the envelope must flag that stored settings were corrupt and ignored");
+        Xunit.Assert.Equal("{ this is not json", session.User.GetGenericData("promptenhance", "config_corrupt_backup"));
     }
 
     [Xunit.Fact]
-    public async Task SavePromptEnhanceSettings_WithCorruptStoredData_StillSavesOverDefaults()
+    public async Task SavePromptEnhanceSettings_WithCorruptStoredData_BacksUpBlobBeforeOverwriting()
     {
         Session session = MakeRealSession();
         session.User.SaveGenericData("promptenhance", "config", "{ this is not json");
@@ -250,8 +252,32 @@ public class SessionSettingsTests
         JObject result = await WebAPI.SessionSettings.SavePromptEnhanceSettings(rawInput, session);
         Xunit.Assert.True(result["success"]!.Value<bool>());
         Xunit.Assert.Equal("llama3", result["settings"]!["model"]!.Value<string>());
+        Xunit.Assert.True(result["recovered"]!.Value<bool>());
         string? stored = session.User.GetGenericData("promptenhance", "config");
         Xunit.Assert.Equal("llama3", JObject.Parse(stored!)["model"]!.Value<string>());
+        Xunit.Assert.Equal("{ this is not json", session.User.GetGenericData("promptenhance", "config_corrupt_backup"));
+    }
+
+    [Xunit.Fact]
+    public async Task CorruptStoreBackup_FirstCorruptionWins_LaterCorruptStateDoesNotClobberIt()
+    {
+        Session session = MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", "{ first corruption");
+        await WebAPI.SessionSettings.GetPromptEnhanceSettings(session);
+        session.User.SaveGenericData("promptenhance", "config", "{ second corruption");
+        await WebAPI.SessionSettings.GetPromptEnhanceSettings(session);
+        Xunit.Assert.Equal("{ first corruption", session.User.GetGenericData("promptenhance", "config_corrupt_backup"));
+    }
+
+    [Xunit.Fact]
+    public async Task GetPromptEnhanceSettings_WithHealthyStore_CarriesNoRecoveredFlag()
+    {
+        Session session = MakeRealSession();
+        JObject rawInput = new() { ["settings"] = new JObject { ["model"] = "llama3" } };
+        await WebAPI.SessionSettings.SavePromptEnhanceSettings(rawInput, session);
+        JObject result = await WebAPI.SessionSettings.GetPromptEnhanceSettings(session);
+        Xunit.Assert.True(result["success"]!.Value<bool>());
+        Xunit.Assert.Null(result["recovered"]);
     }
 
     [Xunit.Fact]

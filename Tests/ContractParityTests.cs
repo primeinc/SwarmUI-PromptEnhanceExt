@@ -84,12 +84,39 @@ public class ContractParityTests
     }
 
     [Xunit.Fact]
-    public void ErrorCategoryCodes_MatchContractExactly()
+    public void ErrorCategoryCodes_MatchContractEntryWise()
     {
-        string[] contractCodes = [.. Contract()["errorCategories"]!.Select(t => t.Value<string>()!).OrderBy(x => x)];
-        string[] actualCodes = [.. Enum.GetValues<WebAPI.PromptEnhanceErrorCategory>()
-            .Select(WebAPI.ErrorHandler.CategoryCode).OrderBy(x => x)];
-        Xunit.Assert.Equal(contractCodes, actualCodes);
+        JObject map = (JObject)Contract()["errorCategories"]!;
+        WebAPI.PromptEnhanceErrorCategory[] enumValues = Enum.GetValues<WebAPI.PromptEnhanceErrorCategory>();
+        Xunit.Assert.Equal(enumValues.Length, map.Count);
+        foreach (WebAPI.PromptEnhanceErrorCategory category in enumValues)
+        {
+            Xunit.Assert.Equal(map[category.ToString()]!.Value<string>(), WebAPI.ErrorHandler.CategoryCode(category));
+        }
+    }
+
+    /// <summary>
+    /// Each contract key's declared `type` must be enforced by ValidateSettings:
+    /// the contract default (always type-correct) is accepted, and a canonical
+    /// wrong-type probe for that declared type is rejected.
+    /// </summary>
+    [Xunit.Fact]
+    public void ValidateSettings_EnforcesContractTypes()
+    {
+        JObject specs = (JObject)Contract()["settings"]!;
+        foreach (JProperty prop in specs.Properties())
+        {
+            Xunit.Assert.Null(WebAPI.SessionSettings.ValidateSettings(new JObject { [prop.Name] = prop.Value["default"] }));
+            JToken rejectProbe = prop.Value["type"]!.Value<string>() switch
+            {
+                "string" => new JValue(42),
+                "integer" => new JValue("not a number"),
+                "number" => new JValue("not a number"),
+                "boolean" => new JValue("yes"),
+                _ => throw new InvalidOperationException($"Unknown contract type for '{prop.Name}'")
+            };
+            Xunit.Assert.NotNull(WebAPI.SessionSettings.ValidateSettings(new JObject { [prop.Name] = rejectProbe }));
+        }
     }
 
     [Xunit.Fact]
@@ -145,15 +172,38 @@ public class ContractRouteParityTests
 public class PinParityTests
 {
     [Xunit.Fact]
-    public void SwarmUIPin_GatesYmlAndJustfileAgree()
+    public void SwarmUIPin_EveryGatesYmlRefEqualsTheJustfilePin()
     {
         string root = ContractParityTests.RepoRoot();
         string gates = File.ReadAllText(Path.Combine(root, ".github", "workflows", "gates.yml"));
         string justfile = File.ReadAllText(Path.Combine(root, "justfile"));
-        Match gatesPin = Regex.Match(gates, @"ref:\s*([0-9a-f]{40})");
         Match justPin = Regex.Match(justfile, "swarmui_pin\\s*:=\\s*\"([0-9a-f]{40})\"");
-        Xunit.Assert.True(gatesPin.Success, "gates.yml must pin the SwarmUI host to a full 40-char SHA.");
         Xunit.Assert.True(justPin.Success, "justfile must define swarmui_pin as a full 40-char SHA.");
-        Xunit.Assert.Equal(gatesPin.Groups[1].Value, justPin.Groups[1].Value);
+        MatchCollection gatesPins = Regex.Matches(gates, @"ref:\s*([0-9a-f]{40})");
+        Xunit.Assert.True(gatesPins.Count >= 1, "gates.yml must pin the SwarmUI host to a full 40-char SHA.");
+        foreach (Match pin in gatesPins)
+        {
+            Xunit.Assert.Equal(justPin.Groups[1].Value, pin.Groups[1].Value);
+        }
+    }
+
+    /// <summary>
+    /// The ProjectReference Properties metadata must be byte-identical across
+    /// both csproj files: MSBuild creates one project instance per unique
+    /// global-property set, and two instances of SwarmUI.csproj race writing
+    /// the same obj output (intermittent CS2012). This pin turns the csproj
+    /// comment into an enforced invariant.
+    /// </summary>
+    [Xunit.Fact]
+    public void SwarmUIProjectReferenceProperties_IdenticalAcrossCsprojFiles()
+    {
+        string root = ContractParityTests.RepoRoot();
+        string extensionCsproj = File.ReadAllText(Path.Combine(root, "PromptEnhance.csproj"));
+        string testsCsproj = File.ReadAllText(Path.Combine(root, "Tests", "PromptEnhance.Tests.csproj"));
+        string[] propertySets = [.. Regex.Matches(extensionCsproj + testsCsproj, @"<Properties>([^<]*)</Properties>")
+            .Select(m => m.Groups[1].Value)];
+        Xunit.Assert.True(propertySets.Length >= 2, "Expected Properties metadata on the SwarmUI ProjectReferences in both csproj files.");
+        Xunit.Assert.True(propertySets.All(p => p == propertySets[0]),
+            $"ProjectReference Properties differ across csproj files — this recreates the two-instance SwarmUI build race (CS2012): [{string.Join(" | ", propertySets.Distinct())}]");
     }
 }

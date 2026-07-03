@@ -78,13 +78,13 @@ type PEEnhanceResult = { ok: true; response: string } | { ok: false; error: stri
  * Fields are optional because each script bootstraps the namespace
  * defensively and script order is a host concern, not a code assumption.
  */
-/** API route names, mirrored from contracts/pe-contract.json (see contracts.ts). */
+/** API route names, mirrored from contracts/pe-contract.json (see contracts.ts). Literal types so a typo'd mirror fails tsc, not just the tests. */
 interface PERoutes {
-    readonly listModels: string;
-    readonly run: string;
-    readonly getSettings: string;
-    readonly saveSettings: string;
-    readonly resetSettings: string;
+    readonly listModels: 'PromptEnhanceListModels';
+    readonly run: 'PromptEnhanceRun';
+    readonly getSettings: 'GetPromptEnhanceSettings';
+    readonly saveSettings: 'SavePromptEnhanceSettings';
+    readonly resetSettings: 'ResetPromptEnhanceSettings';
 }
 
 /** Numeric input bounds, mirrored from contracts/pe-contract.json (see contracts.ts). */

@@ -15,6 +15,7 @@ public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
+    private const string CORRUPT_BACKUP_SUBKEY = "config_corrupt_backup";
 
     /// <summary>
     /// Request timeout ceiling in seconds. Validated values feed
@@ -26,10 +27,10 @@ public class SessionSettings
     public const int MaxTimeoutSeconds = 3600;
 
     /// <summary>
-    /// The canonical defaults. Frontend/contracts.ts mirrors these verbatim
-    /// (SettingsDefaultsParityTests pins the systemPrompt text); a fresh
-    /// profile works against a local Ollama with zero configuration except
-    /// picking a model.
+    /// The canonical defaults, mirroring contracts/pe-contract.json
+    /// (ContractParityTests pins every key and value; Frontend/contracts.ts
+    /// carries the client mirror). A fresh profile works against a local
+    /// Ollama with zero configuration except picking a model.
     /// </summary>
     public static JObject Defaults => new()
     {
@@ -51,8 +52,11 @@ public class SessionSettings
     /// <summary>
     /// Parses the stored settings blob, treating unparseable data as absent.
     /// A corrupted store must degrade to defaults instead of turning every
-    /// Get and Save into an error until a Reset; the corrupt blob is logged
-    /// and overwritten by the next successful save.
+    /// Get and Save into an error until a Reset. The next successful save
+    /// overwrites the corrupt blob, so before that can happen the blob is
+    /// preserved once under <see cref="CORRUPT_BACKUP_SUBKEY"/> (see
+    /// <see cref="ReadStored"/>) and the response envelope carries
+    /// "recovered": true so the client is not silently reset.
     /// </summary>
     private static JObject TryParseStored(string stored)
     {
@@ -66,9 +70,37 @@ public class SessionSettings
         }
         catch (Newtonsoft.Json.JsonException ex)
         {
-            Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save): {ex.Message}");
+            Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save; the corrupt data is kept under the '{CORRUPT_BACKUP_SUBKEY}' subkey): {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reads and parses the stored settings. When the store holds data that
+    /// does not parse, the raw blob is backed up (first corruption wins — a
+    /// later corrupt state never clobbers the original backup) and
+    /// <paramref name="recovered"/> is set so callers can flag the response.
+    /// </summary>
+    private static JObject ReadStored(Session session, out bool recovered)
+    {
+        string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+        JObject storedObj = TryParseStored(stored);
+        recovered = storedObj == null && !string.IsNullOrWhiteSpace(stored);
+        if (recovered)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(session.User.GetGenericData(SETTINGS_KEY, CORRUPT_BACKUP_SUBKEY)))
+                {
+                    session.User.SaveGenericData(SETTINGS_KEY, CORRUPT_BACKUP_SUBKEY, stored);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"[PromptEnhance] Could not back up the corrupt settings blob: {ex.Message}");
+            }
+        }
+        return storedObj;
     }
 
     /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
@@ -77,7 +109,7 @@ public class SessionSettings
         try
         {
             JObject settings = Defaults;
-            JObject storedObj = TryParseStored(session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY));
+            JObject storedObj = ReadStored(session, out bool recovered);
             if (storedObj != null)
             {
                 foreach (string key in KnownKeys)
@@ -88,7 +120,12 @@ public class SessionSettings
                     }
                 }
             }
-            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
+            JObject response = PromptEnhanceAPI.CreateSettingsResponse(settings);
+            if (recovered)
+            {
+                response["recovered"] = true;
+            }
+            return Task.FromResult(response);
         }
         catch (Exception ex)
         {
@@ -118,7 +155,7 @@ public class SessionSettings
                 return Task.FromResult(validationError);
             }
             JObject merged = Defaults;
-            JObject storedObj = TryParseStored(session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY));
+            JObject storedObj = ReadStored(session, out bool recovered);
             if (storedObj != null)
             {
                 foreach (string key in KnownKeys)
@@ -141,7 +178,12 @@ public class SessionSettings
             {
                 return Task.FromResult(persistError);
             }
-            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(merged));
+            JObject response = PromptEnhanceAPI.CreateSettingsResponse(merged);
+            if (recovered)
+            {
+                response["recovered"] = true;
+            }
+            return Task.FromResult(response);
         }
         catch (Exception ex)
         {

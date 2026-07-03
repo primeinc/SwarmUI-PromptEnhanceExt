@@ -43,8 +43,8 @@ public class BackendClient
     /// TTL cache for probe results — MemoryCache from the ASP.NET Core shared
     /// framework, with per-entry absolute expiration in place of hand-rolled
     /// timestamp bookkeeping, locking, and pruning. Keys are normalized base
-    /// URLs from per-user settings (permission-gated, one per user), so
-    /// cardinality stays tiny and every entry self-expires within 30s.
+    /// URLs from permission-gated per-user settings; growth is bounded by TTL
+    /// self-expiry — every entry dies within 30 seconds of insertion.
     /// </summary>
     private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
 

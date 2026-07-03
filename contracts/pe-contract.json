@@ -7,17 +7,17 @@
     "saveSettings": "SavePromptEnhanceSettings",
     "resetSettings": "ResetPromptEnhanceSettings"
   },
-  "errorCategories": [
-    "server_unavailable",
-    "timeout",
-    "invalid_base_url",
-    "model_missing",
-    "unsupported_image",
-    "invalid_response_shape",
-    "http_error",
-    "authentication",
-    "generic"
-  ],
+  "errorCategories": {
+    "ServerUnavailable": "server_unavailable",
+    "Timeout": "timeout",
+    "InvalidBaseUrl": "invalid_base_url",
+    "ModelMissing": "model_missing",
+    "UnsupportedImage": "unsupported_image",
+    "InvalidResponseShape": "invalid_response_shape",
+    "HttpError": "http_error",
+    "Authentication": "authentication",
+    "Generic": "generic"
+  },
   "store": {
     "dataname": "promptenhance",
     "name": "config"

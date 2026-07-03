@@ -10,6 +10,18 @@
  * is tsc build output — do not hand-edit it.
  */
 window.PromptEnhance = window.PromptEnhance || {};
+/**
+ * Display labels for the replace modes. The mode VALUES come from
+ * PromptEnhance.REPLACE_MODES (contracts.ts, pinned to the contract enum);
+ * the panel derives its options from that list, so a contract enum change
+ * cannot leave the panel silently missing a mode. An unlabeled mode falls
+ * back to its raw value.
+ */
+const PE_MODE_LABELS = {
+    preview: 'Preview (Apply / Cancel)',
+    append: 'Append (keep original)',
+    replace_with_restore: 'Replace (with Restore button)'
+};
 /** Writes the panel status line. `kind` is '' | 'ok' | 'error' (CSS class). */
 function peSetStatus(message, kind) {
     const el = document.getElementById('pe_settings_status');
@@ -31,6 +43,9 @@ function peLoadSettings() {
             const result = peAdaptSettingsResult(data);
             if (result.ok) {
                 PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
+                if (peIsRecord(data) && data.recovered === true) {
+                    console.warn('[PromptEnhance] Stored settings were corrupt; defaults were applied and the corrupt data was backed up server-side (generic-data subkey config_corrupt_backup).');
+                }
             }
             else {
                 console.error('[PromptEnhance] Failed to load settings:', result.error);
@@ -237,9 +252,7 @@ function peBuildSettingsPanel() {
 
             <label for="pe_replace_mode">Apply Mode</label>
             <select id="pe_replace_mode">
-                <option value="preview">Preview (Apply / Cancel)</option>
-                <option value="append">Append (keep original)</option>
-                <option value="replace_with_restore">Replace (with Restore button)</option>
+                ${(PromptEnhance.REPLACE_MODES ?? []).map((m) => `<option value="${m}">${PE_MODE_LABELS[m] ?? m}</option>`).join('\n                ')}
             </select>
 
             <label class="pe-checkbox-label">

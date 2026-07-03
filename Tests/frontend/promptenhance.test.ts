@@ -18,7 +18,7 @@ const PROMPT_SRC = fs.readFileSync(path.join(ASSETS, 'promptenhance.js'), 'utf8'
 
 interface PEContractFile {
     routes: Record<string, string>;
-    errorCategories: string[];
+    errorCategories: Record<string, string>;
     store: { dataname: string; name: string };
     settings: Record<string, { type: string; default: unknown; min?: number; max?: number; enum?: string[] }>;
 }
@@ -49,6 +49,7 @@ interface BootCalls {
     showError: string[];
     alerts: string[];
     consoleErrors: string[];
+    consoleWarns: string[];
 }
 
 interface BootOpts {
@@ -73,6 +74,7 @@ type PETestWindow = DOMWindow & {
     peResetSettings: () => Promise<boolean>;
     peFetchModels: () => Promise<void>;
     peShowError: (message: string) => void;
+    peAdaptSettingsResult: (data: unknown) => PESettingsResult;
 };
 
 interface BootResult {
@@ -83,7 +85,7 @@ interface BootResult {
 }
 
 async function boot(opts: BootOpts): Promise<BootResult> {
-    const calls: BootCalls = { genericRequest: [], showError: [], alerts: [], consoleErrors: [] };
+    const calls: BootCalls = { genericRequest: [], showError: [], alerts: [], consoleErrors: [], consoleWarns: [] };
     const dom = new JSDOM(opts.pageHtml ?? PAGE_HTML, { runScripts: 'dangerously', url: 'http://localhost/' });
     const win = dom.window as PETestWindow;
     const doc = win.document;
@@ -112,6 +114,11 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         calls.consoleErrors.push(args.map(String).join(' '));
         realConsoleError(...args);
     }) as typeof win.console.error;
+    const realConsoleWarn = win.console.warn.bind(win.console);
+    win.console.warn = ((...args: unknown[]) => {
+        calls.consoleWarns.push(args.map(String).join(' '));
+        realConsoleWarn(...args);
+    }) as typeof win.console.warn;
     win.triggerChangeFor = () => { };
     if (opts.fetch) {
         win.fetch = opts.fetch as unknown as typeof win.fetch;
@@ -334,6 +341,36 @@ test('Contract: panel clamps numeric inputs to the contract bounds on save', asy
     assert.strictEqual(save.payload.settings!.timeoutSeconds, CONTRACT.settings['timeoutSeconds']!.max, 'timeout clamps to the contract max');
     assert.strictEqual(save.payload.settings!.temperature, CONTRACT.settings['temperature']!.max, 'temperature clamps to the contract max');
     assert.strictEqual(save.payload.settings!.maxTokens, CONTRACT.settings['maxTokens']!.min, 'maxTokens clamps to the contract floor');
+});
+
+test('Contract: the panel apply-mode options derive from the contract enum exactly', async () => {
+    const { win, doc } = await boot({
+        routeResponses: { PromptEnhanceListModels: { success: true, models: [{ id: 'm' }] } }
+    });
+    win.PromptEnhance.openSettingsPanel!();
+    const select = doc.getElementById('pe_replace_mode') as HTMLSelectElement;
+    const values = [...select.options].map((o) => o.value);
+    assert.deepStrictEqual(values, CONTRACT.settings['replaceMode']!.enum, 'panel options must be exactly the contract enum, in order');
+    for (const option of select.options) {
+        assert.ok(option.text.length > 0, `option '${option.value}' must have a visible label`);
+    }
+});
+
+test('Contract: the settings adapter accepts every contract replace mode', async () => {
+    const { win } = await boot({});
+    for (const mode of CONTRACT.settings['replaceMode']!.enum!) {
+        const result = win.peAdaptSettingsResult({ success: true, settings: { replaceMode: mode } });
+        assert.ok(result.ok, `adapter must accept contract mode '${mode}'`);
+        assert.strictEqual((result as { ok: true; settings: Partial<PESettings> }).settings.replaceMode, mode, `adapter must pass mode '${mode}' through unmodified`);
+    }
+});
+
+test('A recovered settings store (corrupt data replaced by defaults) is surfaced via console.warn', async () => {
+    const { calls } = await boot({
+        routeResponses: { GetPromptEnhanceSettings: { success: true, settings: {}, recovered: true } }
+    });
+    assert.ok(calls.consoleWarns.some((line) => line.includes('corrupt')), 'the recovered flag must produce a visible warning');
+    assert.deepStrictEqual(calls.consoleErrors, [], 'recovery is a warning, not an error');
 });
 
 test('Boot is clean: the harness serves a valid settings envelope by default, zero console noise', async () => {
