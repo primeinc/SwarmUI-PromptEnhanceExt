@@ -7,9 +7,11 @@
 # bump the ref deliberately when adopting a newer host.
 name: gates
 
+# Push runs on every branch: work-in-progress branches must get the same gates
+# as master, or "gates passed" claims on a branch are local-only. pull_request
+# stays for fork PRs; the concurrency group cancels superseded runs per ref.
 on:
   push:
-    branches: [master]
   pull_request:
 
 permissions:
