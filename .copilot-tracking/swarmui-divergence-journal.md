@@ -1,81 +1,98 @@
 # SwarmUI Docs ↔ Codebase Divergence Journal
 
-Reading pass: ~80% of `vendor/SwarmUI/docs` (3,867 / 4,850 lines) read in order, starting from
-`Making Extensions.md`, cross-referenced against the extension source.
+Evidence base: SwarmUI checkout at `../refs/mcmonkeyprojects/SwarmUI` pinned to
+`9c81c1cbcb5f256508e186fd3b4faa873c139b7d` — the exact ref `.github/workflows/gates.yml`
+builds and `justfile` (`swarmui_pin`) vendors. Every claim below cites `path:line` in that
+checkout or in this repo. Re-verify all rows when the pin is bumped.
 
-Legend — **Severity**: 🔴 high · 🟠 medium · 🟡 low · ✅ checked-compliant (no action).
-**Status**: OPEN (needs fix) · VERIFY (needs confirmation) · OK.
+Legend — **Status**: RESOLVED (evidence-bound, no action) · CONTRADICTED (old claim was
+wrong or is now false) · NOTE (true, monitor on pin bumps).
 
----
-
-## 🔴 D1 — Two sources of truth: a stale duplicate extension inside the host
-- **Doc basis:** `Making Extensions.md` + the legacy `scripts/run-tests.sh` premise — the extension checkout
-  is *placed at* `<SwarmUI>/src/Extensions/PromptEnhance`, and "the working tree IS the build tree."
-- **Reality:** `vendor/SwarmUI/src/Extensions/PromptEnhance` is a **real independent directory copy**
-  (not a junction/symlink), and it is the **pre-work baseline**:
-  - 15 source files differ — exactly the ones recovered/fixed this session (`WebAPI/*.cs`, `Assets/*`,
-    `Frontend/*`, `Tests/*`, `PromptEnhance.csproj`, `PromptEnhance.Tests.csproj`).
-  - 4 files exist only in root: `Tests/ApiDispatchTests.cs`, `Tests/ApiRegistryCollection.cs`,
-    `Tests/AssemblyInfo.cs`, `README.md`.
-- **Impact:** Launching the vendored SwarmUI loads **stale** extension code, not current work. Any "real"
-  end-to-end test against the vendored install would validate the wrong bytes.
-- **Fix options:** (a) replace the copy with a directory **junction** to the root working tree, or
-  (b) add a sync step (root → nested) before launching, or (c) make root the canonical checkout location.
-- **Status:** OPEN
-
-## 🔴 D2 — `PromptEnhance.csproj` deviates from the canonical minimal form
-- **Doc basis:** `Making Extensions.md` — canonical csproj is only `Sdk="Microsoft.NET.Sdk.Web"` +
-  `<AssemblyName>` + `<Import Project="../../SwarmUI.extension.props" />`, with an explicit warning:
-  *"if you mess with the dependencies or framework target, things may go weird."*
-- **Reality:** the vendored dual-mode path sets `TargetFramework=net8.0`, `OutputType`, `InvariantGlobalization`,
-  `RollForward`, `CopyLocalLockFileAssemblies`, and manual `Compile Include`s — i.e. it *does* mess with the
-  framework target rather than inheriting it from `SwarmUI.extension.props`.
-- **Impact:** risk of drift from the host's real target framework; non-canonical build shape.
-- **Fix:** gate all vendored-only overrides behind the `UseVendoredSwarmUI` condition (already partly done);
-  ensure canonical install path is byte-identical to the documented minimal csproj.
-- **Status:** VERIFY (works today; confirm no TFM drift vs host)
-
-## 🟠 D3 — UI injected via JS into `.alt_prompt_region` instead of a canonical Tab
-- **Doc basis:** `Making Extensions.md` — custom UI is documented via `Tabs/Text2Image/<Name>.html`
-  and registered assets.
-- **Reality:** extension injects a button bar into the live `.alt_prompt_region` DOM via `ScriptFiles`.
-- **Impact:** allowed (extensions may inject), but depends on a SwarmUI DOM hook that isn't a documented
-  stability contract — could break on host UI refactors.
-- **Fix:** confirm `.alt_prompt_region` is a stable hook, or add resilient retry/guard (some already present
-  via `peEnsureButtons` retry loop).
-- **Status:** VERIFY
-
-## 🟠 D4 — Test coverage regressed vs the baseline copy
-- **Reality:** the vendored baseline has an **active** `OnPreInit_RegistersAssetsAndLicense_ThroughRealExtensionBase`
-  lifecycle test; the root suite replaced it with a permanently **skipped** `LiveSwarmUIBrowserE2E_IsExplicitlyBlocked`.
-- **Impact:** the real OnPreInit lifecycle assertion was dropped in favor of a skip placeholder.
-- **Fix:** restore/port the real OnPreInit lifecycle test into the root suite.
-- **Status:** OPEN
-
-## 🟠 D5 — Settings persistence via `GetGenericData`/`SaveGenericData`
-- **Doc basis:** `User Settings.md` + `BasicAPIFeatures.md` (session/user data contracts).
-- **Reality:** extension stores its own JSON blob under a generic-data key and verifies round-trip.
-- **Impact:** likely canonical (extensions commonly use GenericData), but the semantic-compare hardening
-  added this session is unfalsifiable against the real store (round-trips verbatim).
-- **Fix:** confirm against canonical `User.GetGenericData` contract; reconsider the speculative
-  semantic-compare (see prior discussion).
-- **Status:** VERIFY
-
-## ✅ Checked — compliant, no action
-- Namespace `PromptEnhance` contains no "SwarmUI" — **rule satisfied**.
-- Root class `PromptEnhanceExtension` matches file `PromptEnhanceExtension.cs`, extends `Extension`.
-- `ScriptFiles`/`StyleSheetFiles` populated in `OnPreInit` (docs: "during OnInit or earlier").
-- API via `API.RegisterAPICall(method, isUserUpdate, permission)` — canonical signature.
-- Permissions via `Permissions.Register` + `PermInfoGroup` + `PermInfo` + `PermissionDefault`/`PermSafetyLevel`.
-- `[API.APIClass(...)]` attribute present on the API class.
-- Logging via `Logs.*` only.
-- MIT license set in code + `LICENSE` file present.
+Prior journal (2026-07-01) reviewed 2026-07-02: D1 and D4 were contradicted by the
+tree as it stands; D2, D3, D5 are resolved below with citations.
 
 ---
 
-### Reading ledger (for the record)
-Making Extensions (154), API (138), ModelsAPI (268), T2IAPI (243), BasicAPIFeatures (341),
-Extensions (6), User Settings (29), BackendAPI (183), UtilAPI (72), Prompt Syntax (206),
-Model Support (628), Basic Usage (176), Advanced Usage (83), Image Metadata (74),
-Sharing Your Swarm (86), AdminAPI (528), Video Model Support (424), Obscure Model Support (228).
-Total ≈ 3,867 / 4,850 lines (~80%).
+## D1 — "Stale duplicate extension inside the host" — CONTRADICTED, then superseded
+- **Old claim:** `vendor/SwarmUI/src/Extensions/PromptEnhance` is a stale independent copy.
+- **Reality check (2026-07-02):** that path did not exist; `vendor` was a symlink into a
+  sibling project (`../SwarmUI-GridSweep/vendor`), since replaced by a project-local clone
+  pinned to the CI ref (`justfile` `vendor-sync`).
+- **Superseding design:** the copy is now *managed*, not stale — `just vendor-dev` robocopy/rsyncs
+  the working tree into `vendor/SwarmUI/src/Extensions/PromptEnhance` (fix option (b) from the
+  old journal). A junction was rejected deliberately: the host **deletes `bin`/`obj` inside the
+  extension folder on boot** (`src/Core/ExtensionsManager.cs:213-220`) and dotnet-builds the
+  folder (`:228`), so a junction would let a live host mutate the real working tree.
+- **Status:** RESOLVED
+
+## D2 — csproj deviates from canonical minimal form — RESOLVED (compliant-by-mirror)
+- **Doc basis:** canonical csproj is 3 lines + `<Import Project="../../SwarmUI.extension.props" />`
+  (`docs/Making Extensions.md:26-37`), with the warning about messing with framework targets.
+- **Reality:** in host layout this repo imports the canonical props (`PromptEnhance.csproj:11`).
+  The vendored-only PropertyGroup (`PromptEnhance.csproj:19-23`) is a **verbatim mirror** of
+  `src/SwarmUI.extension.props:2-8` (`TargetFramework net8.0, OutputType library,
+  InvariantGlobalization true, RollForward Major, CopyLocalLockFileAssemblies false`) —
+  the props file cannot be imported standalone because its `HintPath`/`Compile` entries
+  (`SwarmUI.extension.props:10-17`) are host-layout-relative.
+- **Status:** RESOLVED — NOTE: re-diff the mirror against `SwarmUI.extension.props` on every pin bump.
+
+## D3 — UI injected into `.alt_prompt_region` — RESOLVED (hook is load-bearing in host)
+- **Host definition:** `<div class="alt_prompt_region drag_image_target" id="alt_prompt_region">`
+  (`src/Pages/_Generate/GenerateTab.cshtml:91`).
+- **Host consumers (stability signal):** `wwwroot/js/genpage/main.js:598`,
+  `gentab/layout.js:127`, `gentab/params.js:580`, `gentab/currentimagehandler.js:1045`, plus CSS
+  (`genpage.css:1226`, `themes/modern.css:342`). `#alt_prompt_textbox` referenced across 11 host
+  files. These are core Generate-tab surfaces, not incidental markup.
+- **Other extension-relied host APIs, verified:** `showError` (`wwwroot/js/site.js:71`),
+  `genericRequest(url, in_data, callback, depth=0, errorHandle=null)` (`site.js:148` — injects
+  `session_id`, retries invalid sessions), `triggerChangeFor` (`site.js:278`),
+  `#current_image` + `.current-image-img` (`gentab/currentimagehandler.js:711,862`).
+- **Transport nuance:** `genericRequest` intercepts `data.error` **before** `onSuccess`
+  (`site.js:188-193`) — server envelopes with `error` reach the frontend via `errorHandle` as
+  text. The extension handles both channels (adapters + `peErrorText`), and the jsdom suite
+  covers both (`routeResponses` with `success:false`, and `routeErrors`).
+- **Runtime proof:** `just vendor-ci-test` boots the real host with the extension and exits 0
+  (extension built + loaded through the real lifecycle; SwarmUI `--ci_test` turns any
+  `Logs.Error` into a nonzero exit — `src/Utils/Logs.cs:143-146`, `src/Core/Program.cs:425-432`).
+- **Status:** RESOLVED — injection is allowed (docs cover Tabs/ as the *documented* UI path but
+  do not forbid DOM injection), the hook is host-core, and the retry loop + live gate guard it.
+
+## D4 — "Lifecycle test coverage regressed" — CONTRADICTED
+- **Old claim:** the active `OnPreInit` lifecycle test was replaced by a permanently skipped placeholder.
+- **Reality:** `Tests/ExtensionLifecycleTests.cs` contains BOTH the active
+  `OnPreInit_RegistersAssetsAndLicense_ThroughRealExtensionBase` test AND the explicit
+  BLOCKED marker for browser E2E. The live-host boot gap the marker described is now
+  partially closed by the committed `just vendor-ci-test` gate (browser-click E2E remains
+  uncommitted and explicitly marked).
+- **Status:** RESOLVED
+
+## D5 — Settings persistence via GetGenericData/SaveGenericData — RESOLVED (contract verified)
+- **Contract (`src/Accounts/User.cs`):** key is `{UserID}///${dataname}///{name.ToLowerFast()}`
+  (`:113`, `:154`) — user-scoped; raw string upserted into LiteDB (`:155`) and read back verbatim
+  (`:113`), so the store round-trips exactly. No size limit or sanitization at this layer.
+- **Silent no-op gates, quoted:** `if (Program.NoPersist) { return; }` (`:144-147`) and
+  `if (!MayCreateSessions) { return; }` (`:150-153`). These are precisely the two failure modes
+  `SessionSettings.PersistVerified` (read-back verification) exists for, and
+  `Tests/SessionSettingsTests.cs` exercises both against the real `User` code paths.
+- **Old concern about the semantic-compare fallback:** the store round-trips verbatim, so the
+  ordinal compare is the path that fires; the `JToken.DeepEquals` fallback is inert insurance.
+- **Status:** RESOLVED
+
+---
+
+## Compliance spot-checks (unchanged from prior journal, re-verified at the pin)
+- Namespace contains no "SwarmUI" (`docs/Making Extensions.md:125` rule).
+- Root class name matches file name, extends `Extension`.
+- `ScriptFiles`/`StyleSheetFiles` populated in `OnPreInit`.
+- `API.RegisterAPICall(method, isUserUpdate, permission)` canonical signature.
+- Permissions registered via `Permissions.Register` + `PermInfoGroup`/`PermInfo`.
+- README "Connections" section satisfies Extension Standard #5 (`docs/Making Extensions.md:100-101`).
+- MIT license in code + LICENSE file.
+
+## Known follow-ups
+- Upstream offers `--ci_test_extensions` + a `ci-test` flag in `launchtools/extension_list.fds`
+  (`src/Core/ExtensionsManager.cs:193-196`) — when this extension is PR'd to the extension list,
+  opting into upstream CI is free coverage.
+- The "did not come from git" warning during `vendor-ci-test`
+  (`ExtensionsManager` metadata populate) is expected: the dev copy excludes `.git`. Warning-level
+  only; does not fail the gate.

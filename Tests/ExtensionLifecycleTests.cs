@@ -9,14 +9,16 @@ public class ExtensionLifecycleTests
 {
     /// <summary>
     /// Explicit BLOCKED marker, kept visible in every test run: no committed
-    /// runner drives a live SwarmUI browser session end-to-end (launch host,
-    /// render Generate tab, click Enhance, observe mutation). The committed
-    /// equivalents at the same boundary are: this class (real Extension base
-    /// lifecycle), ApiRegistrationTests (real API registry + permissions),
+    /// runner drives a live SwarmUI BROWSER session end-to-end (render the
+    /// Generate tab, click Enhance, observe the prompt mutation). The committed
+    /// gates at neighboring boundaries are: `just vendor-ci-test` (boots the
+    /// real host with this extension via SwarmUI's own --ci_test mode; any
+    /// Logs.Error exits nonzero), this class (real Extension base lifecycle),
+    /// ApiRegistrationTests (real API registry + permissions),
     /// BackendTransportTests (real HTTP sockets), and the jsdom suite
     /// (real DOM against the exact served Assets/*.js).
     /// </summary>
-    [Xunit.Fact(Skip = "BLOCKED: live SwarmUI browser E2E has no committed runner; see XML doc for the committed equivalent gates.")]
+    [Xunit.Fact(Skip = "BLOCKED: live browser click-through E2E has no committed runner; the live HOST boot gate is committed as `just vendor-ci-test` — see XML doc.")]
     public void LiveSwarmUIBrowserE2E_IsExplicitlyBlocked()
     {
     }
