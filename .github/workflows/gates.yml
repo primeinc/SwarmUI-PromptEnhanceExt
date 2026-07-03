@@ -1,0 +1,49 @@
+# SwarmUI's extension.props hard-requires the extension to live inside a host
+# checkout at src/Extensions/PromptEnhance (it references ../../GlobalUsings.cs
+# and ../../bin/live_release/SwarmUI.dll), so the csharp job nests this repo
+# inside a SwarmUI checkout and builds the host into bin/live_release first.
+# The host checkout is pinned to the commit the extension is developed and
+# tested against, so reruns of the same extension commit are reproducible;
+# bump the ref deliberately when adopting a newer host.
+name: gates
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run check:frontend-parity
+      - run: npm run test:frontend
+
+  csharp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: mcmonkeyprojects/SwarmUI
+          ref: 9c81c1cbcb5f256508e186fd3b4faa873c139b7d
+          path: SwarmUI
+      - uses: actions/checkout@v4
+        with:
+          path: SwarmUI/src/Extensions/PromptEnhance
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build SwarmUI/src/SwarmUI.csproj -c Release -o SwarmUI/src/bin/live_release
+      - run: dotnet test SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug

@@ -1,4 +1,7 @@
 using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
@@ -87,10 +90,25 @@ public static class ErrorHandler
     };
 
     /// <summary>
+    /// Token match with underscores treated as separators: singular and plural
+    /// forms count ("image", "images", "vision"), snake_case error codes count
+    /// ("image_parse_error", "unsupported_image"), but a hit inside a larger
+    /// letter-run (a model id like "flux-imagey") must not count as the
+    /// backend blaming the image.
+    /// </summary>
+    private static readonly Regex ImageRejectionPattern = new(@"(?<![a-zA-Z0-9])(?:images?|visions?|multimodal|image_url)(?![a-zA-Z0-9])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Case-insensitive deserialization options shared by every OpenAI-compatible wire-shape parse in the extension.</summary>
+    internal static readonly JsonSerializerOptions WireOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>
     /// Heuristic for reclassifying a 400 on a request that carried media:
-    /// OpenAI-compatible servers phrase image rejection inconsistently, so a
-    /// body mentioning image/vision/multimodal is treated as UnsupportedImage.
-    /// Only consulted when media was actually attached (see BackendClient).
+    /// OpenAI-compatible servers phrase image rejection inconsistently, so the
+    /// error text is scanned for image/vision/multimodal tokens. When the body
+    /// is an OpenAI error envelope only error.message, error.type, and
+    /// error.code are scanned — mentions of image elsewhere in the body carry
+    /// no blame; the raw body is scanned only when the envelope shape is
+    /// absent. Only consulted when media was actually attached (see BackendClient).
     /// </summary>
     public static bool LooksLikeImageRejection(string body)
     {
@@ -98,9 +116,25 @@ public static class ErrorHandler
         {
             return false;
         }
-        return body.Contains("image", StringComparison.OrdinalIgnoreCase)
-            || body.Contains("vision", StringComparison.OrdinalIgnoreCase)
-            || body.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
+        ChatError envelope = TryParseErrorEnvelope(body);
+        return ImageRejectionPattern.IsMatch(envelope == null ? body : $"{envelope.Message}\n{envelope.Type}\n{envelope.Code}");
+    }
+
+    /// <summary>Parses the body as an OpenAI-style error envelope (`{"error":{...}}`), returning the inner error object when present, else null.</summary>
+    internal static ChatError TryParseErrorEnvelope(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<ChatErrorResponse>(body, WireOptions)?.Error;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Caps raw backend text for safe inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>

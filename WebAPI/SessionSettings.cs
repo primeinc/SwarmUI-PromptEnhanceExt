@@ -17,6 +17,15 @@ public class SessionSettings
     private const string SETTINGS_SUBKEY = "config";
 
     /// <summary>
+    /// Request timeout ceiling in seconds. Validated values feed
+    /// CancellationTokenSource(TimeSpan) on every backend request, so this
+    /// must stay far below that constructor's limit of Int32.MaxValue
+    /// milliseconds (~2,147,483 seconds). Frontend/settings.ts mirrors this
+    /// bound in its input clamp.
+    /// </summary>
+    public const int MaxTimeoutSeconds = 3600;
+
+    /// <summary>
     /// The canonical defaults. Frontend/contracts.ts mirrors these verbatim
     /// (SettingsDefaultsParityTests pins the systemPrompt text); a fresh
     /// profile works against a local Ollama with zero configuration except
@@ -106,7 +115,11 @@ public class SessionSettings
                     merged[key] = incoming[key];
                 }
             }
-            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, merged.ToString());
+            JObject persistError = PersistVerified(session, merged.ToString());
+            if (persistError != null)
+            {
+                return Task.FromResult(persistError);
+            }
             return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(merged));
         }
         catch (Exception ex)
@@ -117,10 +130,14 @@ public class SessionSettings
     }
 
     /// <summary>
-    /// Schema validation for an incoming partial settings object. Integer
-    /// fields are bounded to [1, int.MaxValue] as long values — an over-range
-    /// stored value would otherwise overflow later Value&lt;int?&gt; reads into an
-    /// unclassified 500. Returns null when valid, else a classified error response.
+    /// Schema validation for an incoming partial settings object, covering
+    /// every key in <see cref="KnownKeys"/>. baseUrl must survive
+    /// <see cref="BackendClient.NormalizeBaseUrl"/>, so a URL that would fail
+    /// every later request is rejected at save time instead. timeoutSeconds is
+    /// bounded to [1, <see cref="MaxTimeoutSeconds"/>]; maxTokens to
+    /// [1, int.MaxValue] as a long value — an over-range stored value would
+    /// otherwise overflow later Value&lt;int?&gt; reads into an unclassified 500.
+    /// Returns null when valid, else a classified error response.
     /// </summary>
     public static JObject ValidateSettings(JObject incoming)
     {
@@ -131,13 +148,33 @@ public class SessionSettings
             {
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a non-empty string.");
             }
+            if (BackendClient.NormalizeBaseUrl(baseUrl.Value<string>()) == null)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a valid http(s) URL (for example http://localhost:11434).");
+            }
+        }
+        JToken model = incoming["model"];
+        if (model != null && model.Type != JTokenType.Null)
+        {
+            if (model.Type != JTokenType.String)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Model must be a string (an empty string means no model is selected).");
+            }
         }
         JToken timeoutSeconds = incoming["timeoutSeconds"];
         if (timeoutSeconds != null && timeoutSeconds.Type != JTokenType.Null)
         {
-            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1 || timeoutSeconds.Value<long>() > int.MaxValue)
+            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1 || timeoutSeconds.Value<long>() > MaxTimeoutSeconds)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Timeout (seconds) must be a whole number between 1 and {int.MaxValue}.");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Timeout (seconds) must be a whole number between 1 and {MaxTimeoutSeconds}.");
+            }
+        }
+        JToken systemPrompt = incoming["systemPrompt"];
+        if (systemPrompt != null && systemPrompt.Type != JTokenType.Null)
+        {
+            if (systemPrompt.Type != JTokenType.String)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "System prompt must be a string.");
             }
         }
         JToken maxTokens = incoming["maxTokens"];
@@ -161,6 +198,14 @@ public class SessionSettings
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Temperature must be a number between 0 and 2.");
             }
         }
+        JToken sendSelectedImage = incoming["sendSelectedImage"];
+        if (sendSelectedImage != null && sendSelectedImage.Type != JTokenType.Null)
+        {
+            if (sendSelectedImage.Type != JTokenType.Boolean)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send selected image must be a boolean (true or false).");
+            }
+        }
         JToken replaceMode = incoming["replaceMode"];
         if (replaceMode != null && replaceMode.Type != JTokenType.Null)
         {
@@ -173,13 +218,64 @@ public class SessionSettings
         return null;
     }
 
+    /// <summary>
+    /// Writes the serialized settings through User.SaveGenericData and reads
+    /// them back to confirm they were actually stored: SaveGenericData
+    /// silently no-ops when Program.NoPersist is set or the account may not
+    /// create sessions, and a success response without storage would tell the
+    /// user "Saved." for settings that vanish on restart. Returns null on
+    /// verified persistence, else a classified error response.
+    /// </summary>
+    private static JObject PersistVerified(Session session, string serialized)
+    {
+        session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, serialized);
+        string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+        if (!PersistedMatches(stored, serialized))
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "The server did not persist the settings (persistence is disabled or this account cannot save data).");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="stored"/> represents the same settings that were
+    /// just written. Compares ordinally first (the common case: the store
+    /// round-trips the exact string), then falls back to a semantic JSON compare
+    /// so a persistence layer that reformats whitespace or reorders keys is not
+    /// mistaken for a failed save. A null read or unparseable data is treated as
+    /// not persisted.
+    /// </summary>
+    private static bool PersistedMatches(string stored, string serialized)
+    {
+        if (stored == null)
+        {
+            return false;
+        }
+        if (string.Equals(stored, serialized, System.StringComparison.Ordinal))
+        {
+            return true;
+        }
+        try
+        {
+            return JToken.DeepEquals(JToken.Parse(stored), JToken.Parse(serialized));
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/> and returns them.</summary>
     public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try
         {
             JObject settings = Defaults;
-            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, settings.ToString());
+            JObject persistError = PersistVerified(session, settings.ToString());
+            if (persistError != null)
+            {
+                return Task.FromResult(persistError);
+            }
             return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)

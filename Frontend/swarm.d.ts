@@ -10,7 +10,7 @@
  * These are global scripts (no import/export): SwarmUI loads extension
  * frontend files as plain <script> tags via Extension.ScriptFiles, so all
  * three files share one global scope, in registration order:
- * contracts.js, settings.js, promptenhance.js.
+ * contracts.js, promptenhance.js, settings.js (PromptEnhanceExtension.OnPreInit).
  */
 
 /** Prompt-application policy selector. `preview` is the only non-mutating mode. */

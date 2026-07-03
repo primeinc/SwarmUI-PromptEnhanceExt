@@ -115,7 +115,7 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         doc.getElementById('current_image')!.appendChild(img);
     }
 
-    for (const src of [CONTRACTS_SRC, SETTINGS_SRC, PROMPT_SRC]) {
+    for (const src of [CONTRACTS_SRC, PROMPT_SRC, SETTINGS_SRC]) {
         const s = doc.createElement('script');
         s.textContent = src;
         doc.body.appendChild(s);
@@ -316,6 +316,22 @@ test('Save settings round-trips the panel values and surfaces Saved status', asy
     assert.strictEqual(saves[0]!.payload.settings!.baseUrl, 'http://box:8080/v1', 'panel value is trimmed and sent');
     assert.strictEqual(win.PromptEnhance.settings!.model, 'saved-model', 'server-confirmed settings are merged back');
     assert.strictEqual(doc.getElementById('pe_settings_status')!.textContent, 'Saved.', 'status line reports the save');
+});
+
+test('F1: opening the panel fetches models, and Save keeps the stored model when the list failed to load', async () => {
+    const { win, calls } = await boot({
+        settings: { model: 'stored-model' },
+        routeErrors: { PromptEnhanceListModels: new Error('backend down') },
+        routeResponses: { SavePromptEnhanceSettings: { success: true, settings: { model: 'stored-model' } } }
+    });
+    win.PromptEnhance.openSettingsPanel!();
+    const fetches = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceListModels');
+    assert.strictEqual(fetches.length, 1, 'opening the panel must issue a PromptEnhanceListModels request');
+    const ok = await win.peSaveSettings();
+    assert.strictEqual(ok, true, 'save resolves true on success');
+    const saves = calls.genericRequest.filter((c) => c.route === 'SavePromptEnhanceSettings');
+    assert.strictEqual(saves.length, 1, 'one save request sent');
+    assert.strictEqual(saves[0]!.payload.settings!.model, 'stored-model', 'an unpopulated dropdown must not erase the stored model');
 });
 
 test('Save failure surfaces the classified error in the status line and resolves false', async () => {

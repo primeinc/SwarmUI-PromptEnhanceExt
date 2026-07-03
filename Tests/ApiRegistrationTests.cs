@@ -1,12 +1,14 @@
 namespace PromptEnhance.Tests;
 
+[Xunit.Collection(ApiRegistryCollectionDefinition.Name)]
 public class ApiRegistrationTests
 {
     [Xunit.Fact]
     public void Register_WiresIsUserUpdateAndPermissionPerRoute()
     {
-        PromptEnhance.WebAPI.PromptEnhanceAPI.Register();
-
+        // Routes are registered exactly once by ApiRegistryFixture (the collection
+        // fixture); this test reads that registration instead of calling Register()
+        // itself, so it never risks a duplicate-key Dictionary.Add.
         Xunit.Assert.False(SwarmUI.WebAPI.API.APIHandlers["promptenhancelistmodels"].IsUserUpdate);
         Xunit.Assert.True(SwarmUI.WebAPI.API.APIHandlers["promptenhancerun"].IsUserUpdate);
         Xunit.Assert.False(SwarmUI.WebAPI.API.APIHandlers["getpromptenhancesettings"].IsUserUpdate);

@@ -72,7 +72,10 @@ public class ErrorHandlerTests
 
     [Xunit.Theory]
     [Xunit.InlineData("{\"error\":{\"message\":\"This model does not support image input.\",\"type\":\"invalid_request_error\",\"code\":null}}")]
+    [Xunit.InlineData("{\"error\":{\"message\":\"Model does not support images.\"}}")]
     [Xunit.InlineData("{\"error\":{\"message\":\"image_url is not supported by this model\"}}")]
+    [Xunit.InlineData("{\"error\":{\"message\":\"Invalid request.\",\"type\":\"image_parse_error\"}}")]
+    [Xunit.InlineData("{\"error\":{\"message\":\"Bad request.\",\"code\":\"unsupported_image\"}}")]
     [Xunit.InlineData("The model has no vision capability")]
     [Xunit.InlineData("multimodal input rejected")]
     public void LooksLikeImageRejection_TrueWhenBodyBlamesImage(string body)
@@ -86,6 +89,8 @@ public class ErrorHandlerTests
     [Xunit.InlineData("   ")]
     [Xunit.InlineData("{\"error\":{\"message\":\"This model's maximum context length is 4096 tokens.\",\"type\":\"invalid_request_error\"}}")]
     [Xunit.InlineData("{\"error\":{\"message\":\"Unknown parameter: 'foo'.\"}}")]
+    [Xunit.InlineData("{\"error\":{\"message\":\"unknown model: flux-imagey\"}}")]
+    [Xunit.InlineData("{\"error\":{\"message\":\"Bad request.\",\"param\":\"messages.0.content.image_url\"}}")]
     public void LooksLikeImageRejection_FalseForUnrelatedOrEmptyBody(string? body)
     {
         Xunit.Assert.False(WebAPI.ErrorHandler.LooksLikeImageRejection(body!));

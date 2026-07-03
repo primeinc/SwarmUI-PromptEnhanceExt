@@ -1,9 +1,43 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
     <PropertyGroup>
         <AssemblyName>PromptEnhance</AssemblyName>
+        <UseVendoredSwarmUI Condition="Exists('vendor/SwarmUI/src/SwarmUI.csproj') and !Exists('../../SwarmUI.extension.props')">true</UseVendoredSwarmUI>
     </PropertyGroup>
-    <Import Project="../../SwarmUI.extension.props" />
+
+    <!--
+      Documented install path: <SwarmUI>/src/Extensions/PromptEnhance
+      In that layout, rely on SwarmUI's canonical extension props.
+    -->
+    <Import Project="../../SwarmUI.extension.props" Condition="'$(UseVendoredSwarmUI)' != 'true' and Exists('../../SwarmUI.extension.props')" />
+
+    <!--
+      Standalone workspace path with vendored SwarmUI under ./vendor/SwarmUI.
+      We cannot import SwarmUI.extension.props here because its Compile includes
+      are relative to the extension project location in the host repo layout.
+    -->
+    <PropertyGroup Condition="'$(UseVendoredSwarmUI)' == 'true'">
+        <TargetFramework>net8.0</TargetFramework>
+        <OutputType>library</OutputType>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <RollForward>Major</RollForward>
+        <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(UseVendoredSwarmUI)' == 'true'">
+        <ProjectReference Include="vendor/SwarmUI/src/SwarmUI.csproj" />
+    </ItemGroup>
+
+    <Import Project="vendor/SwarmUI/src/SwarmUI.deps.props" Condition="'$(UseVendoredSwarmUI)' == 'true' and Exists('vendor/SwarmUI/src/SwarmUI.deps.props')" />
+
     <ItemGroup>
         <Compile Remove="Tests/**/*.cs" />
+        <Compile Remove="vendor/**/*.cs" />
+        <Content Remove="vendor/**" />
+        <None Remove="vendor/**" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(UseVendoredSwarmUI)' == 'true'">
+        <Compile Include="vendor/SwarmUI/src/GlobalSuppressions.cs" Link="GlobalSuppressions.cs" />
+        <Compile Include="vendor/SwarmUI/src/GlobalUsings.cs" Link="GlobalUsings.cs" />
     </ItemGroup>
 </Project>

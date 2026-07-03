@@ -19,7 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\SwarmUI.csproj">
+    <ProjectReference Include="..\vendor\SwarmUI\src\SwarmUI.csproj" Condition="Exists('..\vendor\SwarmUI\src\SwarmUI.csproj')">
+      <Properties>_EnableMacOSCodeSign=false;StaticWebAssetsEnabled=false</Properties>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\SwarmUI.csproj" Condition="Exists('..\..\..\SwarmUI.csproj')">
       <Properties>_EnableMacOSCodeSign=false;StaticWebAssetsEnabled=false</Properties>
     </ProjectReference>
     <ProjectReference Include="..\PromptEnhance.csproj" />

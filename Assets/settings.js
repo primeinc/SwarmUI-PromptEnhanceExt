@@ -44,9 +44,12 @@ function peLoadSettings() {
 }
 /**
  * DOM adapter: reads the panel fields into a full PESettings value.
- * Missing or non-numeric fields fall back to the current effective settings,
- * and numeric bounds mirror the server-side ValidateSettings floors so the
- * panel cannot even submit a value the server would reject as non-positive.
+ * Missing or non-numeric fields fall back to the current effective settings.
+ * Mirrored server-side ValidateSettings bounds: timeoutSeconds is clamped to
+ * [1, 3600], temperature to [0, 2], and maxTokens to a floor of 1 (its
+ * int.MaxValue ceiling is not mirrored). An empty model selection means
+ * "keep the current model": the dropdown has no affordance for clearing a
+ * model, so an unpopulated or placeholder selection must never erase one.
  */
 function peReadPanelValues() {
     const current = peEffectiveSettings();
@@ -64,10 +67,10 @@ function peReadPanelValues() {
     const sendImage = document.getElementById('pe_send_image');
     return {
         baseUrl: text('pe_base_url', current.baseUrl).trim(),
-        model: text('pe_model_select', current.model),
-        timeoutSeconds: Math.max(1, Math.round(num('pe_timeout', current.timeoutSeconds))),
+        model: text('pe_model_select', current.model) || current.model,
+        timeoutSeconds: Math.min(3600, Math.max(1, Math.round(num('pe_timeout', current.timeoutSeconds)))),
         systemPrompt: text('pe_system_prompt', current.systemPrompt),
-        temperature: num('pe_temperature', current.temperature),
+        temperature: Math.min(2, Math.max(0, num('pe_temperature', current.temperature))),
         maxTokens: Math.max(1, Math.round(num('pe_max_tokens', current.maxTokens))),
         sendSelectedImage: sendImage ? sendImage.checked : current.sendSelectedImage,
         replaceMode: replaceMode
@@ -206,7 +209,7 @@ function peBuildSettingsPanel() {
         <div class="pe-settings-body">
             <label for="pe_base_url">Base URL</label>
             <input type="text" id="pe_base_url" placeholder="http://localhost:11434">
-            <div class="pe-field-hint">OpenAI-compatible server. A root URL or one ending in /v1 both work.</div>
+            <div class="pe-field-hint">OpenAI-compatible server. A root URL or one ending in /v1 both work. No API key is sent, so the server must not require authentication.</div>
 
             <label for="pe_model_select">Model
                 <button type="button" class="pe-inline-btn" id="pe_refresh_models" title="Refresh models">⟳</button>
@@ -227,7 +230,7 @@ function peBuildSettingsPanel() {
                 </div>
                 <div class="pe-field-col">
                     <label for="pe_timeout">Timeout (s)</label>
-                    <input type="number" id="pe_timeout" min="1" step="1">
+                    <input type="number" id="pe_timeout" min="1" max="3600" step="1">
                 </div>
             </div>
 
@@ -265,10 +268,16 @@ function peBuildSettingsPanel() {
     });
     return panel;
 }
+/**
+ * Opens the panel and refreshes the model list. The fetch must run on every
+ * open: the dropdown otherwise holds only the static placeholder, and a Save
+ * would read an empty selection instead of the configured model.
+ */
 function peOpenSettingsPanel() {
     const panel = peBuildSettingsPanel();
     pePopulatePanel();
     peSetStatus('', '');
+    peFetchModels();
     panel.style.display = 'block';
 }
 function peCloseSettingsPanel() {

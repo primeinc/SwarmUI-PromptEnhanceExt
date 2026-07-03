@@ -79,8 +79,6 @@ public class PromptEnhanceAPI
         ["error"] = ErrorHandler.Format(category, detail)
     };
 
-    private static readonly JsonSerializerOptions WireOptions = new() { PropertyNameCaseInsensitive = true };
-
     /// <summary>
     /// Adapter: `/v1/models` body -> model list. Returns null (classified as
     /// InvalidResponseShape by the caller) when the body is not the expected
@@ -91,7 +89,7 @@ public class PromptEnhanceAPI
     {
         try
         {
-            ModelsListResponse parsed = JsonSerializer.Deserialize<ModelsListResponse>(json, WireOptions);
+            ModelsListResponse parsed = JsonSerializer.Deserialize<ModelsListResponse>(json, ErrorHandler.WireOptions);
             if (parsed?.Data == null)
             {
                 return null;
@@ -117,7 +115,7 @@ public class PromptEnhanceAPI
     {
         try
         {
-            ChatCompletionResponse parsed = JsonSerializer.Deserialize<ChatCompletionResponse>(json, WireOptions);
+            ChatCompletionResponse parsed = JsonSerializer.Deserialize<ChatCompletionResponse>(json, ErrorHandler.WireOptions);
             string content = parsed?.Choices is { Count: > 0 } ? parsed.Choices[0].Message?.Content : null;
             return string.IsNullOrWhiteSpace(content) ? null : content.Trim();
         }
@@ -135,17 +133,7 @@ public class PromptEnhanceAPI
     /// </summary>
     public static string ExtractErrorMessage(string json)
     {
-        try
-        {
-            ChatErrorResponse parsed = JsonSerializer.Deserialize<ChatErrorResponse>(json, WireOptions);
-            if (!string.IsNullOrWhiteSpace(parsed?.Error?.Message))
-            {
-                return parsed.Error.Message;
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        return ErrorHandler.Excerpt(json);
+        ChatError error = ErrorHandler.TryParseErrorEnvelope(json);
+        return string.IsNullOrWhiteSpace(error?.Message) ? ErrorHandler.Excerpt(json) : error.Message;
     }
 }

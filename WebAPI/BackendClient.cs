@@ -37,6 +37,9 @@ public class BackendClient
     private const int ReachabilityTimeoutSeconds = 3;
     private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
+
+    /// <summary>Prune horizon for the reachability cache; must stay comfortably above both TTLs so a still-live entry is never evicted.</summary>
+    private static readonly TimeSpan ReachabilityPruneAge = TimeSpan.FromMinutes(5);
     private static readonly object ReachabilityLock = new();
     private static readonly Dictionary<string, (bool reachable, DateTime whenUtc)> ReachabilityCache = new();
 
@@ -70,11 +73,20 @@ public class BackendClient
     private static string ChatUrl(string normalizedBase) => $"{normalizedBase}/v1/chat/completions";
 
     /// <summary>
-    /// Cheap 3-second reachability probe with a small TTL cache (10s on
-    /// success, 30s on failure) so an offline backend fails fast and
-    /// repeatedly clicking Enhance doesn't hammer a dead host. Any HTTP
-    /// response — even an error page — counts as reachable; only transport
-    /// failures and timeouts count as unreachable.
+    /// Cheap reachability probe with a small TTL cache (10s reachable, 30s
+    /// unreachable) so an offline backend fails fast and repeatedly clicking
+    /// Enhance doesn't hammer a dead host. Probes `GET /v1/models` — the
+    /// endpoint the real requests depend on — because some servers hang or
+    /// refuse on the bare root while serving /v1/* fine. Any HTTP response —
+    /// even an error page — counts as reachable; only transport failures
+    /// (connection refused, DNS) count as unreachable. A probe timeout is
+    /// inconclusive: a backend whose model listing is slow (an aggregating
+    /// proxy, a cold model scan) must not be reported down when the real
+    /// request could still succeed within the user's timeoutSeconds, so the
+    /// probe gives up after <see cref="ReachabilityTimeoutSeconds"/> seconds
+    /// and lets the per-request timeout govern. Each insert prunes entries
+    /// older than <see cref="ReachabilityPruneAge"/> so the cache stays
+    /// bounded over the process lifetime.
     /// </summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
@@ -93,20 +105,47 @@ public class BackendClient
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(ReachabilityTimeoutSeconds));
-            using HttpRequestMessage probe = new(HttpMethod.Get, normalizedBase);
-            await HttpClient.SendAsync(probe, cts.Token);
+            using HttpRequestMessage probe = new(HttpMethod.Get, ModelsUrl(normalizedBase));
+            using HttpResponseMessage response = await HttpClient.SendAsync(probe, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             reachable = true;
         }
-        catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException or HttpRequestException)
+        catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException)
+        {
+            Logs.Warning($"[PromptEnhance] Reachability probe for {normalizedBase} got no response within {ReachabilityTimeoutSeconds}s; proceeding and letting the request timeout decide.");
+            reachable = true;
+        }
+        catch (HttpRequestException ex)
         {
             Logs.Warning($"[PromptEnhance] Backend at {normalizedBase} not reachable: {ex.GetType().Name}");
             reachable = false;
         }
         lock (ReachabilityLock)
         {
-            ReachabilityCache[normalizedBase] = (reachable, DateTime.UtcNow);
+            DateTime nowUtc = DateTime.UtcNow;
+            List<string> stale = [.. ReachabilityCache.Where(entry => nowUtc - entry.Value.whenUtc > ReachabilityPruneAge).Select(entry => entry.Key)];
+            foreach (string key in stale)
+            {
+                ReachabilityCache.Remove(key);
+            }
+            ReachabilityCache[normalizedBase] = (reachable, nowUtc);
         }
         return reachable;
+    }
+
+    /// <summary>
+    /// Effective per-request timeout from settings, clamped to
+    /// [1, <see cref="SessionSettings.MaxTimeoutSeconds"/>] so an out-of-range
+    /// stored value can never feed an invalid CancellationTokenSource duration.
+    /// Reads as long first to avoid overflow on oversized stored integers.
+    /// </summary>
+    private static int ResolveTimeoutSeconds(JObject settings)
+    {
+        JToken token = settings["timeoutSeconds"];
+        long raw = token != null && (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            ? token.Value<long>()
+            : 60L;
+        long clamped = Math.Clamp(raw, 1L, (long)SessionSettings.MaxTimeoutSeconds);
+        return (int)clamped;
     }
 
     /// <summary>Loads the session's settings and validates the base URL, funneling failures through <paramref name="setError"/> as classified responses.</summary>
@@ -141,8 +180,7 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ServerUnavailable);
         }
-        int timeoutSec = settings["timeoutSeconds"]?.Value<int?>() ?? 60;
-        return await ExecuteListModels(normalizedBase, timeoutSec);
+        return await ExecuteListModels(normalizedBase, ResolveTimeoutSeconds(settings));
     }
 
     /// <summary>
@@ -217,7 +255,7 @@ public class BackendClient
         string systemPrompt = settings["systemPrompt"]?.ToString();
         double temperature = settings["temperature"]?.Value<double?>() ?? 0.7;
         int maxTokens = settings["maxTokens"]?.Value<int?>() ?? 1024;
-        int timeoutSec = settings["timeoutSeconds"]?.Value<int?>() ?? 60;
+        int timeoutSec = ResolveTimeoutSeconds(settings);
         List<BackendSchema.MediaContent> media;
         try
         {

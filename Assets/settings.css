@@ -142,7 +142,7 @@
 }
 
 .pe-save-btn {
-    background-color: var(--emphasis-soft);
+    background-color: var(--emphasis-soft, var(--emphasis));
     color: var(--emphasis-text);
     font-weight: 600;
 }

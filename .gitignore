@@ -1,5 +1,8 @@
 /bin
 /obj
+# Also ignore nested build output (e.g. Tests/bin, Tests/obj) in any subdirectory
+bin/
+obj/
 /dist
 /build
 /node_modules
