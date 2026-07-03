@@ -108,6 +108,41 @@ public class BackendTransportTests
         JObject r = await WebAPI.BackendClient.ExecuteChat($"http://127.0.0.1:{deadPort}", "m", "sys", "hi", [], 0.7, 1024, 5);
         Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
     }
+
+    /// <summary>
+    /// Full public-route round-trip: real session settings, the reachability
+    /// probe's failure path (connection refused -> ServerUnavailable before any
+    /// real fetch). Each test uses a unique port so the probe's TTL cache
+    /// cannot leak state across tests. The cache's time behavior (10s/30s TTLs,
+    /// prune) has no seam without clock injection and stays untested by design.
+    /// </summary>
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_DeadBackend_ClassifiesServerUnavailableViaProbe()
+    {
+        TcpListener probe = new(IPAddress.Loopback, 0);
+        probe.Start();
+        int deadPort = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://127.0.0.1:{deadPort}\"}}");
+        JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.False(r["success"]!.Value<bool>());
+        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+    }
+
+    /// <summary>The probe's success path: a live socket passes reachability, then the real fetch returns the model list.</summary>
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_LiveBackend_PassesProbeAndReturnsModels()
+    {
+        using MockHttpServer server = new(200, "OK", ModelsBody);
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"{server.BaseUrl}\"}}");
+        JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.True(r["success"]!.Value<bool>());
+        JArray models = (JArray)r["models"]!;
+        Xunit.Assert.Single(models);
+        Xunit.Assert.Equal("mock-enhancer", ((JObject)models[0])["id"]!.Value<string>());
+    }
 }
 
 internal sealed class MockHttpServer : IDisposable

@@ -180,23 +180,8 @@ public class SessionSettingsTests
         Xunit.Assert.Null(error);
     }
 
-    /// <summary>
-    /// A REAL User through the real constructor and the real upstream
-    /// Get/SaveGenericData code paths (including their Program.NoPersist and
-    /// MayCreateSessions gates). Only the SessionHandler constructor is
-    /// bypassed — it opens an on-disk LiteDB user database — so the generic
-    /// data store is swapped for an in-memory LiteDB collection.
-    /// </summary>
-    private static Session MakeRealSession()
-    {
-        SessionHandler handler = (SessionHandler)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(SessionHandler));
-        handler.DBLock = new();
-        handler.Roles = new();
-        LiteDB.LiteDatabase database = new(new MemoryStream());
-        handler.GenericData = database.GetCollection<SessionHandler.GenericDataStore>("generic_data");
-        User user = new(handler, new User.DatabaseEntry { ID = "promptenhance_test_user", RawSettings = "\n" });
-        return new Session { User = user };
-    }
+    /// <summary>Real User + in-memory LiteDB store; see <see cref="TestSessions.MakeRealSession"/>.</summary>
+    private static Session MakeRealSession() => TestSessions.MakeRealSession();
 
     [Xunit.Fact]
     public async Task SavePromptEnhanceSettings_UnderNoPersist_ReturnsClassifiedErrorNotSaved()
@@ -244,6 +229,29 @@ public class SessionSettingsTests
         JObject result = await WebAPI.SessionSettings.SavePromptEnhanceSettings(rawInput, session);
         AssertRejected(result);
         Xunit.Assert.Contains("persist", result["error"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task GetPromptEnhanceSettings_WithCorruptStoredData_DegradesToDefaults()
+    {
+        Session session = MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", "{ this is not json");
+        JObject result = await WebAPI.SessionSettings.GetPromptEnhanceSettings(session);
+        Xunit.Assert.True(result["success"]!.Value<bool>());
+        Xunit.Assert.Equal("http://localhost:11434", result["settings"]!["baseUrl"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task SavePromptEnhanceSettings_WithCorruptStoredData_StillSavesOverDefaults()
+    {
+        Session session = MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", "{ this is not json");
+        JObject rawInput = new() { ["settings"] = new JObject { ["model"] = "llama3" } };
+        JObject result = await WebAPI.SessionSettings.SavePromptEnhanceSettings(rawInput, session);
+        Xunit.Assert.True(result["success"]!.Value<bool>());
+        Xunit.Assert.Equal("llama3", result["settings"]!["model"]!.Value<string>());
+        string? stored = session.User.GetGenericData("promptenhance", "config");
+        Xunit.Assert.Equal("llama3", JObject.Parse(stored!)["model"]!.Value<string>());
     }
 
     [Xunit.Fact]

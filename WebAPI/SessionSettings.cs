@@ -48,16 +48,38 @@ public class SessionSettings
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
     ];
 
+    /// <summary>
+    /// Parses the stored settings blob, treating unparseable data as absent.
+    /// A corrupted store must degrade to defaults instead of turning every
+    /// Get and Save into an error until a Reset; the corrupt blob is logged
+    /// and overwritten by the next successful save.
+    /// </summary>
+    private static JObject TryParseStored(string stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return null;
+        }
+        try
+        {
+            return JObject.Parse(stored);
+        }
+        catch (Newtonsoft.Json.JsonException ex)
+        {
+            Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save): {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
     public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
         {
             JObject settings = Defaults;
-            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
-            if (!string.IsNullOrWhiteSpace(stored))
+            JObject storedObj = TryParseStored(session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY));
+            if (storedObj != null)
             {
-                JObject storedObj = JObject.Parse(stored);
                 foreach (string key in KnownKeys)
                 {
                     if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
@@ -96,10 +118,9 @@ public class SessionSettings
                 return Task.FromResult(validationError);
             }
             JObject merged = Defaults;
-            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
-            if (!string.IsNullOrWhiteSpace(stored))
+            JObject storedObj = TryParseStored(session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY));
+            if (storedObj != null)
             {
-                JObject storedObj = JObject.Parse(stored);
                 foreach (string key in KnownKeys)
                 {
                     if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
