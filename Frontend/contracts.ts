@@ -1,10 +1,6 @@
 /**
- * Boundary contracts shared by settings.ts and promptenhance.ts.
- *
- * This file owns every adapter that normalizes loosely shaped input crossing
- * an ownership boundary: SwarmUI API responses, transport errors, and the
- * settings schema. It is registered FIRST in Extension.ScriptFiles so its
- * declarations exist before either feature script runs a handler.
+ * Boundary contracts shared by settings.ts and promptenhance.ts. Registered
+ * FIRST in Extension.ScriptFiles.
  *
  * AUTHORITATIVE SOURCE: Frontend/contracts.ts. The committed Assets/contracts.js
  * is tsc build output — do not hand-edit it.
@@ -14,13 +10,7 @@ window.PromptEnhance = window.PromptEnhance || {};
 
 PromptEnhance.REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
 
-/**
- * Mirrors of contracts/pe-contract.json (the single source of truth shared
- * with the C# backend). The jsdom contract tests fail if these drift from
- * the JSON; ContractParityTests pins the C# side to the same file. These are
- * the ONLY definition sites in the frontend — route names and numeric bounds
- * must be referenced from here, never re-typed as literals.
- */
+/** Mirrors of contracts/pe-contract.json. The only frontend definition sites for route names and numeric bounds. */
 const PE_ROUTES: PERoutes = {
     listModels: 'PromptEnhanceListModels',
     run: 'PromptEnhanceRun',
@@ -38,12 +28,7 @@ const PE_LIMITS: PELimits = {
 PromptEnhance.ROUTES = PE_ROUTES;
 PromptEnhance.LIMITS = PE_LIMITS;
 
-/**
- * Client-side mirror of the defaults in contracts/pe-contract.json (also
- * mirrored by SessionSettings.Defaults in WebAPI/SessionSettings.cs).
- * ContractParityTests (C#) and the jsdom contract test pin both mirrors to
- * the JSON; change the contract first, then the mirrors, or the gates fail.
- */
+/** Client-side mirror of the defaults in contracts/pe-contract.json. */
 const PE_DEFAULT_SETTINGS: PESettings = {
     baseUrl: 'http://localhost:11434',
     model: '',
@@ -57,7 +42,7 @@ const PE_DEFAULT_SETTINGS: PESettings = {
 
 PromptEnhance.settings = Object.assign({}, PE_DEFAULT_SETTINGS, PromptEnhance.settings);
 
-/** The full settings view: server-loaded values over defaults, never partial. */
+/** The full settings view: server-loaded values over defaults. */
 function peEffectiveSettings(): PESettings {
     return Object.assign({}, PE_DEFAULT_SETTINGS, PromptEnhance.settings);
 }
@@ -66,11 +51,7 @@ function peIsRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
-/**
- * Normalizes a genericRequest error-callback value (string, Error, or
- * arbitrary host object) into user-presentable text. Nothing is dropped:
- * unrecognized shapes fall back to a stable generic message.
- */
+/** Normalizes a genericRequest error-callback value (string, Error, or arbitrary host object) into text. */
 function peErrorText(err: unknown): string {
     if (err instanceof Error && err.message) {
         return err.message;
@@ -92,12 +73,7 @@ function peEnvelopeError(data: unknown, fallback: string): string {
     return fallback;
 }
 
-/**
- * Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult.
- * Accepts only `success: true` with an object `settings` payload; every key is
- * copied only when it matches the schema type, so a corrupted store can never
- * leak a wrongly typed value into the client settings state.
- */
+/** Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult. Accepts only `success: true` with an object `settings` payload; each key is copied only when it matches the schema type. */
 function peAdaptSettingsResult(data: unknown): PESettingsResult {
     if (!peIsRecord(data) || data.success !== true || !peIsRecord(data.settings)) {
         return { ok: false, error: peEnvelopeError(data, 'Settings request failed.') };
@@ -131,11 +107,7 @@ function peAdaptSettingsResult(data: unknown): PESettingsResult {
     return { ok: true, settings };
 }
 
-/**
- * Adapter: PromptEnhanceListModels response -> PEModelsResult.
- * An empty model list is classified as a failure — the UI treats "no models"
- * as a configuration problem to surface, never as a silently empty dropdown.
- */
+/** Adapter: PromptEnhanceListModels response -> PEModelsResult. An empty model list is classified as a failure. */
 function peAdaptModelsResult(data: unknown): PEModelsResult {
     if (!peIsRecord(data) || data.success !== true || !Array.isArray(data.models)) {
         return { ok: false, error: peEnvelopeError(data, 'Could not fetch models.') };
@@ -152,11 +124,7 @@ function peAdaptModelsResult(data: unknown): PEModelsResult {
     return { ok: true, models };
 }
 
-/**
- * Adapter: PromptEnhanceRun response -> PEEnhanceResult.
- * Success requires a non-empty string `response`; anything else is a
- * classified failure carrying the server's error text when present.
- */
+/** Adapter: PromptEnhanceRun response -> PEEnhanceResult. Success requires a non-empty string `response`. */
 function peAdaptEnhanceResult(data: unknown): PEEnhanceResult {
     if (peIsRecord(data) && data.success === true && typeof data.response === 'string' && data.response.length > 0) {
         return { ok: true, response: data.response };

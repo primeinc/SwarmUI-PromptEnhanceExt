@@ -1,7 +1,7 @@
 /**
  * Generate-tab integration for the PromptEnhance extension: the Enhance
- * button bar, the image-context adapter, and the reversible prompt-mutation
- * policy (preview / append / replace-with-restore).
+ * button bar, the image-context adapter, and the prompt-mutation policy
+ * (preview / append / replace-with-restore).
  *
  * AUTHORITATIVE SOURCE: Frontend/promptenhance.ts. The committed
  * Assets/promptenhance.js is tsc build output — do not hand-edit it.
@@ -18,10 +18,7 @@ function pePromptBox(): HTMLTextAreaElement | null {
     return document.getElementById('alt_prompt_textbox') as HTMLTextAreaElement | null;
 }
 
-/**
- * Writes the prompt textarea and notifies SwarmUI through its own change
- * hook (`triggerChangeFor`, site.js) so Swarm-side listeners stay in sync.
- */
+/** Writes the prompt textarea and notifies SwarmUI through `triggerChangeFor` (site.js). */
 function peSetPrompt(text: string): void {
     const box = pePromptBox();
     if (!box) {
@@ -46,11 +43,7 @@ function peSetLoading(on: boolean): void {
     }
 }
 
-/**
- * Surfaces an error to the user. Prefers SwarmUI's own `showError` banner;
- * if the host helper is absent or itself throws, the failure is logged and
- * the message still reaches the user via alert. No path swallows the message.
- */
+/** Surfaces an error to the user via SwarmUI's `showError` banner, falling back to console + alert. */
 function peShowError(message: string): void {
     try {
         if (typeof window.showError === 'function') {
@@ -64,13 +57,7 @@ function peShowError(message: string): void {
     alert(message);
 }
 
-/**
- * Image-context adapter: reads the currently selected Generate-tab image
- * (the `#current_image` element SwarmUI renders) into a base64 part.
- * Returns null when no image is selected — a legitimate text-only enhance.
- * Throws a classified, user-readable Error when an image exists but cannot
- * be read, so the caller can refuse to send a silently image-less request.
- */
+/** Reads the currently selected Generate-tab image into a base64 part. Returns null when no image is selected; throws when an image exists but cannot be read. */
 async function peGetSelectedImage(): Promise<PEImagePart | null> {
     const img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
         || document.querySelector<HTMLImageElement>('#current_image img');
@@ -101,11 +88,7 @@ async function peGetSelectedImage(): Promise<PEImagePart | null> {
     }
 }
 
-/**
- * Transport adapter: one PromptEnhanceRun round-trip, normalized to a
- * PEEnhanceResult. Transport-level failures resolve (never reject) so the
- * caller has exactly one failure channel.
- */
+/** Transport adapter: one PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport-level failures resolve (never reject). */
 function peEnhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
     return new Promise((resolve) => {
         genericRequest(PE_ROUTES.run, payload,
@@ -116,14 +99,7 @@ function peEnhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
     });
 }
 
-/**
- * Prompt-mutation policy. Every mode preserves a recovery path:
- * - preview: nothing changes until the user clicks Apply.
- * - append: the original stays inline above the enhancement.
- * - replace_with_restore: the box is replaced, and the TRUE original is
- *   stashed once (see PromptEnhanceNamespace.lastOriginal invariant) so
- *   Restore recovers it even after repeated enhances.
- */
+/** Prompt-mutation policy: preview shows an Apply/Cancel panel; append keeps the original inline; replace_with_restore swaps the box and stashes the original for Restore. */
 function peApplyEnhancement(original: string, enhanced: string): void {
     const mode = PromptEnhance.settings?.replaceMode || 'preview';
     if (mode === 'append') {
@@ -174,13 +150,7 @@ function peHideRestore(): void {
     }
 }
 
-/**
- * The Enhance click flow: validate input, optionally attach the selected
- * image, run the backend round-trip, and apply the result through the
- * mutation policy. Reentrancy is guarded, and the loading state clears on
- * every path — including image-collection failure and transport failure —
- * so the button can never wedge in spinner purgatory.
- */
+/** The Enhance click flow: validate input, optionally attach the selected image, run the backend round-trip, apply the result. Reentrancy is guarded; the loading state clears on every path. */
 async function peHandleEnhance(): Promise<void> {
     if (PromptEnhance.enhancing) {
         return;
@@ -219,10 +189,7 @@ async function peHandleEnhance(): Promise<void> {
     }
 }
 
-/**
- * Injects the button bar and preview panel into SwarmUI's Generate-tab
- * prompt region. Idempotent: a second call is a no-op while the bar exists.
- */
+/** Injects the button bar and preview panel into SwarmUI's Generate-tab prompt region. Idempotent. */
 function peAddPromptButtons(): void {
     const region = document.querySelector('.alt_prompt_region');
     if (!region || document.getElementById('pe_button_bar')) {
@@ -279,15 +246,7 @@ function peAddPromptButtons(): void {
     preview.querySelector<HTMLButtonElement>('#pe_preview_cancel')!.addEventListener('click', peHidePreview);
 }
 
-/**
- * SwarmUI renders the Generate tab asynchronously after DOMContentLoaded, so
- * injection polls for `.alt_prompt_region` (every 250ms, up to ~10s) instead
- * of assuming the region exists at script load. Bounded so a non-Generate
- * page (eg the installer) doesn't poll forever. A bounded poll is a deliberate
- * choice over MutationObserver: the host's own first-party JS uses no
- * observers anywhere, and a subtree observer on body would fire on every DOM
- * change of the heavy Generate-tab render for a one-shot lookup.
- */
+/** Polls for `.alt_prompt_region` (every 250ms, up to ~10s) and injects the buttons when it appears. */
 function peEnsureButtons(attempt: number = 0): void {
     if (document.querySelector('.alt_prompt_region')) {
         peAddPromptButtons();

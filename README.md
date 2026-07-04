@@ -28,9 +28,9 @@ Users without `promptenhance_use_backend` cannot cause the server to make any ne
 
 This extension makes outbound web connections **only to the base URL configured in its settings** (default `http://localhost:11434`), and only when a permitted user triggers an action. Exactly three requests exist, touching only two paths under the base URL:
 
-| Request | When | Why |
+| Request | When | What |
 | --- | --- | --- |
-| `GET {baseUrl}/v1/models` | Before every model-list or enhance call | A reachability probe so a dead backend fails fast. Only transport failures (connection refused, DNS) count as unreachable; if no response arrives within 3 seconds the probe gives up and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
+| `GET {baseUrl}/v1/models` | Before every model-list or enhance call | Reachability probe. Only transport failures (connection refused, DNS) count as unreachable; no response within 3 seconds counts as reachable and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
 | `GET {baseUrl}/v1/models` | When the settings panel loads or refreshes the model list | Model discovery for the model dropdown. |
 | `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
 
@@ -59,8 +59,8 @@ No API key or `Authorization` header is sent with any request. Use a server that
 
 Two layouts build and test identically; the C# project picks one automatically (`UseVendoredSwarmUI` in `PromptEnhance.csproj`):
 
-1. **Host layout** — the checkout lives at `<SwarmUI>/src/Extensions/PromptEnhance` and imports SwarmUI's canonical `SwarmUI.extension.props`. `scripts/run-tests.sh` (requires `SWARMUI_ROOT`) reproduces every committed gate in this layout — the working tree is the build tree.
-2. **Standalone workspace** — the checkout lives anywhere, with the SwarmUI host vendored at `./vendor/SwarmUI`, pinned to the same commit CI builds (`swarmui_pin` in the `justfile`, mirrored by the ref in `.github/workflows/gates.yml`). Set up with `just vendor-sync`; the vendored property group in `PromptEnhance.csproj` mirrors `SwarmUI.extension.props` verbatim and must be re-checked when the pin is bumped.
+1. **Host layout** — the checkout lives at `<SwarmUI>/src/Extensions/PromptEnhance` and imports SwarmUI's canonical `SwarmUI.extension.props`. `scripts/run-tests.sh` (requires `SWARMUI_ROOT`) runs every committed gate in this layout.
+2. **Standalone workspace** — the checkout lives anywhere, with the SwarmUI host vendored at `./vendor/SwarmUI`, pinned to the same commit CI builds (`swarmui_pin` in the `justfile`, mirrored by the ref in `.github/workflows/gates.yml`). Set up with `just vendor-sync`. The vendored property group in `PromptEnhance.csproj` mirrors `SwarmUI.extension.props` verbatim; re-check it when the pin is bumped.
 
 The individual gates, runnable from the extension directory in either layout:
 
@@ -73,7 +73,7 @@ dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite against the r
 
 Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
 
-Two more standalone-workspace recipes make the vendored host a runnable dev install: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` (skips SwarmUI's first-run installer) and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` then boots the real host with SwarmUI's own `--ci_test` mode — the extension is built and loaded through the real lifecycle, and any logged error fails the gate with a nonzero exit.
+Two more standalone-workspace recipes: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` boots the real host with SwarmUI's `--ci_test` mode — any logged error fails the gate with a nonzero exit.
 
 ## License
 

@@ -5,12 +5,7 @@ using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// The extension's closed error taxonomy. Every backend failure the extension
-/// can encounter is classified into exactly one of these categories; API
-/// responses carry the snake_case code from <see cref="ErrorHandler.CategoryCode"/>
-/// plus user-actionable text from <see cref="ErrorHandler.Format"/>.
-/// </summary>
+/// <summary>The extension's closed error taxonomy. API responses carry the snake_case code from <see cref="ErrorHandler.CategoryCode"/> plus text from <see cref="ErrorHandler.Format"/>.</summary>
 public enum PromptEnhanceErrorCategory
 {
     ServerUnavailable,
@@ -41,13 +36,7 @@ public static class ErrorHandler
         _ => "generic"
     };
 
-    /// <summary>
-    /// User-facing recovery text for a category, optionally followed by an
-    /// excerpt of the raw backend detail. Every message names the concrete
-    /// action the user can take (fix the URL, pick a model, raise the timeout,
-    /// disable image sending, ...) — classification without a recovery path
-    /// would just be a fancier way to be broken.
-    /// </summary>
+    /// <summary>User-facing recovery text for a category, optionally followed by an excerpt of the raw backend detail.</summary>
     public static string Format(PromptEnhanceErrorCategory category, string detail = null)
     {
         string baseMessage = category switch
@@ -73,12 +62,7 @@ public static class ErrorHandler
         return string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage}\n\nDetail: {Excerpt(detail)}";
     }
 
-    /// <summary>
-    /// Classifies an HTTP non-success status. 404 maps to ModelMissing because
-    /// OpenAI-compatible servers commonly 404 both unknown routes and unknown
-    /// models; 401/403 map to Authentication; 5xx to ServerUnavailable;
-    /// anything unrecognized stays a generic HttpError rather than guessing.
-    /// </summary>
+    /// <summary>Classifies an HTTP non-success status: 401/403 → Authentication, 404 → ModelMissing, 408/504 → Timeout, 413/422 → UnsupportedImage, 500/502/503 → ServerUnavailable, else HttpError.</summary>
     public static PromptEnhanceErrorCategory CategorizeHttpStatus(HttpStatusCode status) => status switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => PromptEnhanceErrorCategory.Authentication,
@@ -89,27 +73,12 @@ public static class ErrorHandler
         _ => PromptEnhanceErrorCategory.HttpError
     };
 
-    /// <summary>
-    /// Token match with underscores treated as separators: singular and plural
-    /// forms count ("image", "images", "vision"), snake_case error codes count
-    /// ("image_parse_error", "unsupported_image"), but a hit inside a larger
-    /// letter-run (a model id like "flux-imagey") must not count as the
-    /// backend blaming the image.
-    /// </summary>
     private static readonly Regex ImageRejectionPattern = new(@"(?<![a-zA-Z0-9])(?:images?|visions?|multimodal|image_url)(?![a-zA-Z0-9])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>Case-insensitive deserialization options shared by every OpenAI-compatible wire-shape parse in the extension.</summary>
     internal static readonly JsonSerializerOptions WireOptions = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>
-    /// Heuristic for reclassifying a 400 on a request that carried media:
-    /// OpenAI-compatible servers phrase image rejection inconsistently, so the
-    /// error text is scanned for image/vision/multimodal tokens. When the body
-    /// is an OpenAI error envelope only error.message, error.type, and
-    /// error.code are scanned — mentions of image elsewhere in the body carry
-    /// no blame; the raw body is scanned only when the envelope shape is
-    /// absent. Only consulted when media was actually attached (see BackendClient).
-    /// </summary>
+    /// <summary>Token-scans an error body for image/vision/multimodal terms. When the body is an OpenAI error envelope only error.message, error.type, and error.code are scanned; the raw body is scanned only when the envelope shape is absent.</summary>
     public static bool LooksLikeImageRejection(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
@@ -137,7 +106,7 @@ public static class ErrorHandler
         }
     }
 
-    /// <summary>Caps raw backend text for safe inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>
+    /// <summary>Caps raw backend text for inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>
     public static string Excerpt(string text, int max = 600)
     {
         if (string.IsNullOrEmpty(text))

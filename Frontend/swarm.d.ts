@@ -7,20 +7,15 @@
  * Frontend/tsconfig.json and `npm run check:frontend-parity`). Never hand-edit
  * the emitted Assets/*.js.
  *
- * These are global scripts (no import/export): SwarmUI loads extension
- * frontend files as plain <script> tags via Extension.ScriptFiles, so all
- * three files share one global scope, in registration order:
+ * These are global scripts (no import/export), loaded as plain <script> tags
+ * via Extension.ScriptFiles in registration order:
  * contracts.js, promptenhance.js, settings.js (PromptEnhanceExtension.OnPreInit).
  */
 
-/** Prompt-application policy selector. `preview` is the only non-mutating mode. */
+/** Prompt-application policy selector. */
 type PEReplaceMode = 'preview' | 'append' | 'replace_with_restore';
 
-/**
- * The single settings schema, mirrored verbatim by the server-side
- * `SessionSettings.Defaults` (WebAPI/SessionSettings.cs). The server is the
- * source of truth; this type is the client-side view of the same eight keys.
- */
+/** The settings schema, mirrored by the server-side `SessionSettings.Defaults` (WebAPI/SessionSettings.cs). */
 interface PESettings {
     baseUrl: string;
     model: string;
@@ -63,22 +58,12 @@ interface PEPending {
     enhanced: string;
 }
 
-/**
- * Discriminated results produced by the wire adapters in contracts.ts.
- * Every backend response crosses the boundary through one of these; loosely
- * shaped JSON never leaks past the adapter that classified it.
- */
+/** Discriminated results produced by the wire adapters in contracts.ts. */
 type PESettingsResult = { ok: true; settings: Partial<PESettings> } | { ok: false; error: string };
 type PEModelsResult = { ok: true; models: PEModelOption[] } | { ok: false; error: string };
 type PEEnhanceResult = { ok: true; response: string } | { ok: false; error: string };
 
-/**
- * The extension's single frontend namespace. All cross-file state lives here;
- * nothing else is added to `window` except pe-prefixed top-level functions.
- * Fields are optional because each script bootstraps the namespace
- * defensively and script order is a host concern, not a code assumption.
- */
-/** API route names, mirrored from contracts/pe-contract.json (see contracts.ts). Literal types so a typo'd mirror fails tsc, not just the tests. */
+/** API route names, mirrored from contracts/pe-contract.json (see contracts.ts). */
 interface PERoutes {
     readonly listModels: 'PromptEnhanceListModels';
     readonly run: 'PromptEnhanceRun';
@@ -97,11 +82,7 @@ interface PELimits {
 interface PromptEnhanceNamespace {
     initialized?: boolean;
     enhancing?: boolean;
-    /**
-     * The earliest pre-enhancement prompt, stashed once per replace cycle.
-     * Invariant: never overwritten while non-null, so Restore always returns
-     * the TRUE original even after repeated enhances. Cleared only by Restore.
-     */
+    /** The earliest pre-enhancement prompt, stashed once per replace cycle. Never overwritten while non-null; cleared only by Restore. */
     lastOriginal?: string | null;
     pending?: PEPending | null;
     settings?: Partial<PESettings>;
@@ -115,20 +96,15 @@ interface PromptEnhanceNamespace {
 
 interface Window {
     PromptEnhance?: PromptEnhanceNamespace;
-    /** SwarmUI host helper (site.js): notifies Swarm's UI that an input changed. Optional: absent in test harnesses. */
+    /** SwarmUI host helper (site.js): notifies Swarm's UI that an input changed. Absent in test harnesses. */
     triggerChangeFor?: (elem: HTMLElement) => void;
-    /** SwarmUI host helper (site.js): surfaces an error banner to the user. Optional: absent in test harnesses. */
+    /** SwarmUI host helper (site.js): surfaces an error banner to the user. Absent in test harnesses. */
     showError?: (message: string) => void;
 }
 
 declare var PromptEnhance: PromptEnhanceNamespace;
 
-/**
- * SwarmUI host API transport (site.js). Sends a session-authenticated POST to
- * `/API/<route>`. The response JSON is untyped at this boundary by design —
- * every caller must normalize `data` through a contracts.ts adapter before use.
- * `onError` receives whatever the host passes (string or Error-like).
- */
+/** SwarmUI host API transport (site.js). Sends a session-authenticated POST to `/API/<route>`. `onError` receives whatever the host passes (string or Error-like). */
 declare function genericRequest(
     route: string,
     payload: object,

@@ -22,7 +22,7 @@ public class ModelsListResponse
     public List<ModelEntry> Data { get; set; }
 }
 
-/// <summary>One entry in the `/v1/models` data array. Only `id` is load-bearing; the rest exists to match the wire schema.</summary>
+/// <summary>One entry in the `/v1/models` data array.</summary>
 public class ModelEntry
 {
     [JsonPropertyName("id")]
@@ -72,7 +72,7 @@ public class ChatResponseMessage
     public string Content { get; set; }
 }
 
-/// <summary>Wire shape of an OpenAI-style error envelope (`{"error":{"message":...}}`), used to extract readable detail from non-success bodies.</summary>
+/// <summary>Wire shape of an OpenAI-style error envelope (`{"error":{"message":...}}`).</summary>
 public class ChatErrorResponse
 {
     [JsonPropertyName("error")]
@@ -87,7 +87,6 @@ public class ChatError
     [JsonPropertyName("type")]
     public string Type { get; set; }
 
-    /// <summary>Typed as string: servers send both string and null codes; a numeric code would be a schema violation worth surfacing as invalid shape.</summary>
     [JsonPropertyName("code")]
     public string Code { get; set; }
 }

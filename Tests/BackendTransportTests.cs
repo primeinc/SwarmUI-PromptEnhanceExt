@@ -109,16 +109,6 @@ public class BackendTransportTests
         Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
     }
 
-    /// <summary>
-    /// Full public-route round-trip with a dead backend: real session settings,
-    /// connection refused -> ServerUnavailable (the probe and the real fetch
-    /// classify this failure identically, so the assertion does not claim which
-    /// one fired). Each test uses a unique port so the probe's TTL cache cannot
-    /// leak state across tests. The TTL values themselves (10s/30s) stay
-    /// unpinned by choice: MemoryCacheOptions offers a clock seam, but wiring a
-    /// test clock through the private static cache buys a pin on tuning values
-    /// that are not part of any contract.
-    /// </summary>
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_DeadBackend_ClassifiesServerUnavailable()
     {
@@ -133,7 +123,6 @@ public class BackendTransportTests
         Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
     }
 
-    /// <summary>The probe's success path: a live socket passes reachability, then the real fetch returns the model list.</summary>
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_LiveBackend_PassesProbeAndReturnsModels()
     {

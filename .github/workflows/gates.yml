@@ -1,17 +1,5 @@
-# SwarmUI's extension.props hard-requires the extension to live inside a host
-# checkout at src/Extensions/PromptEnhance (it references ../../GlobalUsings.cs
-# and ../../bin/live_release/SwarmUI.dll), so the csharp job nests this repo
-# inside a SwarmUI checkout and builds the host into bin/live_release first.
-# The host checkout is pinned to the commit the extension is developed and
-# tested against, so reruns of the same extension commit are reproducible;
-# bump the ref deliberately when adopting a newer host.
 name: gates
 
-# Push runs on every branch (not tags): work-in-progress branches must get the
-# same gates as master, or "gates passed" claims on a branch are local-only.
-# pull_request covers fork PRs only — same-repo PRs already ran on push, and the
-# job-level fork guard prevents the duplicate. cancel-in-progress is disabled on
-# master so every merged commit keeps its own gate verdict.
 on:
   push:
     branches: ['**']
@@ -55,8 +43,6 @@ jobs:
       - run: dotnet build SwarmUI/src/SwarmUI.csproj -c Release -o SwarmUI/src/bin/live_release
       - run: dotnet test SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug
 
-  # The vendored (standalone-workspace) build graph — the layout the csproj race
-  # fix exists for — must also be exercised in CI, not only on dev machines.
   csharp-vendored:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository

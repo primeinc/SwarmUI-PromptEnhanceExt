@@ -180,7 +180,6 @@ public class SessionSettingsTests
         Xunit.Assert.Null(error);
     }
 
-    /// <summary>Real User + in-memory LiteDB store; see <see cref="TestSessions.MakeRealSession"/>.</summary>
     private static Session MakeRealSession() => TestSessions.MakeRealSession();
 
     [Xunit.Fact]

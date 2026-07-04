@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of truth for every value shared across the C# backend, the TypeScript frontend, and the tests. Each language keeps exactly one definition site mirroring this file; ContractParityTests (C#) and the jsdom contract tests (TS) fail on any drift. Change values HERE first, then update the mirrors until the gates pass.",
+  "$comment": "Values shared across the C# backend, the TypeScript frontend, and the tests. Change values HERE first, then update the mirrors until the gates pass.",
   "routes": {
     "listModels": "PromptEnhanceListModels",
     "run": "PromptEnhanceRun",

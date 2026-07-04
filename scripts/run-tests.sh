@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Canonical reproduction of every committed validation gate.
-#
-# SwarmUI's extension.props hard-requires the extension to live inside a host
-# checkout at src/Extensions/PromptEnhance (it references ../../GlobalUsings.cs
-# and ../../bin/live_release/SwarmUI.dll), so the working tree IS the build
-# tree: one git checkout placed in the host, no copy step.
+# Runs every committed validation gate in the host layout (<SwarmUI>/src/Extensions/PromptEnhance).
 set -euo pipefail
 
 HOST="${SWARMUI_ROOT:?Set SWARMUI_ROOT to a SwarmUI checkout (git clone https://github.com/mcmonkeyprojects/SwarmUI)}"

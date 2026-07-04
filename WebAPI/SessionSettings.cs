@@ -4,34 +4,17 @@ using SwarmUI.Utils;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// Settings persistence: the single server-side source of truth for the
-/// eight-key settings schema, stored per-user through SwarmUI's own generic
-/// user-data store (User.GetGenericData/SaveGenericData). Reads merge stored
-/// values over <see cref="Defaults"/> key-by-key, so unknown or missing keys
-/// can never corrupt the effective settings.
-/// </summary>
+/// <summary>Settings persistence for the eight-key settings schema, stored per-user through User.GetGenericData/SaveGenericData. Reads merge stored values over <see cref="Defaults"/> key-by-key.</summary>
 public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
     private const string CORRUPT_BACKUP_SUBKEY = "config_corrupt_backup";
 
-    /// <summary>
-    /// Request timeout ceiling in seconds. Validated values feed
-    /// CancellationTokenSource(TimeSpan) on every backend request, so this
-    /// must stay far below that constructor's limit of Int32.MaxValue
-    /// milliseconds (~2,147,483 seconds). Frontend/settings.ts mirrors this
-    /// bound in its input clamp.
-    /// </summary>
+    /// <summary>Request timeout ceiling in seconds. Frontend/settings.ts mirrors this bound.</summary>
     public const int MaxTimeoutSeconds = 3600;
 
-    /// <summary>
-    /// The canonical defaults, mirroring contracts/pe-contract.json
-    /// (ContractParityTests pins every key and value; Frontend/contracts.ts
-    /// carries the client mirror). A fresh profile works against a local
-    /// Ollama with zero configuration except picking a model.
-    /// </summary>
+    /// <summary>The defaults, mirroring contracts/pe-contract.json.</summary>
     public static JObject Defaults => new()
     {
         ["baseUrl"] = "http://localhost:11434",
@@ -49,15 +32,7 @@ public class SessionSettings
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
     ];
 
-    /// <summary>
-    /// Parses the stored settings blob, treating unparseable data as absent.
-    /// A corrupted store must degrade to defaults instead of turning every
-    /// Get and Save into an error until a Reset. The next successful save
-    /// overwrites the corrupt blob, so before that can happen the blob is
-    /// preserved once under <see cref="CORRUPT_BACKUP_SUBKEY"/> (see
-    /// <see cref="ReadStored"/>) and the response envelope carries
-    /// "recovered": true so the client is not silently reset.
-    /// </summary>
+    /// <summary>Parses the stored settings blob, treating unparseable data as absent.</summary>
     private static JObject TryParseStored(string stored)
     {
         if (string.IsNullOrWhiteSpace(stored))
@@ -75,12 +50,7 @@ public class SessionSettings
         }
     }
 
-    /// <summary>
-    /// Reads and parses the stored settings. When the store holds data that
-    /// does not parse, the raw blob is backed up (first corruption wins — a
-    /// later corrupt state never clobbers the original backup) and
-    /// <paramref name="recovered"/> is set so callers can flag the response.
-    /// </summary>
+    /// <summary>Reads and parses the stored settings. Unparseable data is backed up once under <see cref="CORRUPT_BACKUP_SUBKEY"/> and <paramref name="recovered"/> is set.</summary>
     private static JObject ReadStored(Session session, out bool recovered)
     {
         string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
@@ -134,12 +104,7 @@ public class SessionSettings
         }
     }
 
-    /// <summary>
-    /// API route: validates then persists a partial settings object. The merge
-    /// order is defaults ← previously stored ← incoming, per known key, so a
-    /// partial save never erases unrelated settings and unknown keys are
-    /// dropped at the boundary.
-    /// </summary>
+    /// <summary>API route: validates then persists a partial settings object. Merge order is defaults ← previously stored ← incoming, per known key; unknown keys are dropped.</summary>
     public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
     {
         try
@@ -192,16 +157,7 @@ public class SessionSettings
         }
     }
 
-    /// <summary>
-    /// Schema validation for an incoming partial settings object, covering
-    /// every key in <see cref="KnownKeys"/>. baseUrl must survive
-    /// <see cref="BackendClient.NormalizeBaseUrl"/>, so a URL that would fail
-    /// every later request is rejected at save time instead. timeoutSeconds is
-    /// bounded to [1, <see cref="MaxTimeoutSeconds"/>]; maxTokens to
-    /// [1, int.MaxValue] as a long value — an over-range stored value would
-    /// otherwise overflow later Value&lt;int?&gt; reads into an unclassified 500.
-    /// Returns null when valid, else a classified error response.
-    /// </summary>
+    /// <summary>Schema validation for an incoming partial settings object, covering every key in <see cref="KnownKeys"/>. Returns null when valid, else a classified error response.</summary>
     public static JObject ValidateSettings(JObject incoming)
     {
         JToken baseUrl = incoming["baseUrl"];
@@ -281,14 +237,7 @@ public class SessionSettings
         return null;
     }
 
-    /// <summary>
-    /// Writes the serialized settings through User.SaveGenericData and reads
-    /// them back to confirm they were actually stored: SaveGenericData
-    /// silently no-ops when Program.NoPersist is set or the account may not
-    /// create sessions, and a success response without storage would tell the
-    /// user "Saved." for settings that vanish on restart. Returns null on
-    /// verified persistence, else a classified error response.
-    /// </summary>
+    /// <summary>Writes the serialized settings through User.SaveGenericData and reads them back. Returns null on verified persistence, else a classified error response.</summary>
     private static JObject PersistVerified(Session session, string serialized)
     {
         session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, serialized);
@@ -300,14 +249,7 @@ public class SessionSettings
         return null;
     }
 
-    /// <summary>
-    /// True when <paramref name="stored"/> represents the same settings that were
-    /// just written. Compares ordinally first (the common case: the store
-    /// round-trips the exact string), then falls back to a semantic JSON compare
-    /// so a persistence layer that reformats whitespace or reorders keys is not
-    /// mistaken for a failed save. A null read or unparseable data is treated as
-    /// not persisted.
-    /// </summary>
+    /// <summary>True when <paramref name="stored"/> represents the same settings that were just written: ordinal compare, then semantic JSON compare. A null read or unparseable data is treated as not persisted.</summary>
     private static bool PersistedMatches(string stored, string serialized)
     {
         if (stored == null)

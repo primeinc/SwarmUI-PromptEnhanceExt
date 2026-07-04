@@ -7,12 +7,7 @@ using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// The extension's two permission nodes, registered in SwarmUI's permission
-/// system. Both default to POWERUSERS with the POWERFUL safety level: the
-/// backend permission authorizes outbound web connections, and the config
-/// permission controls where those connections go.
-/// </summary>
+/// <summary>The extension's two permission nodes. Both default to POWERUSERS with the POWERFUL safety level.</summary>
 public static class PromptEnhancePermissions
 {
     public static readonly PermInfoGroup PromptEnhancePermGroup =
@@ -31,11 +26,7 @@ public static class PromptEnhancePermissions
 [API.APIClass("Prompt-enhancement routes for the PromptEnhance extension")]
 public class PromptEnhanceAPI
 {
-    /// <summary>
-    /// Registers the five routes. The bool is SwarmUI's IsUserUpdate flag:
-    /// true for calls that mutate user-visible state (run, save, reset),
-    /// false for pure reads (list models, get settings).
-    /// </summary>
+    /// <summary>Registers the five routes. The bool is SwarmUI's IsUserUpdate flag: true for run/save/reset, false for list models and get settings.</summary>
     public static void Register()
     {
         API.RegisterAPICall(BackendClient.PromptEnhanceListModels, false, PromptEnhancePermissions.PermUseBackend);
@@ -71,7 +62,7 @@ public class PromptEnhanceAPI
         ["settings"] = settings
     };
 
-    /// <summary>The single error envelope: success=false plus the stable errorCategory code and user-actionable error text.</summary>
+    /// <summary>The single error envelope: success=false plus the stable errorCategory code and error text.</summary>
     public static JObject CreateErrorResponse(PromptEnhanceErrorCategory category, string detail = null) => new()
     {
         ["success"] = false,
@@ -79,12 +70,7 @@ public class PromptEnhanceAPI
         ["error"] = ErrorHandler.Format(category, detail)
     };
 
-    /// <summary>
-    /// Adapter: `/v1/models` body -> model list. Returns null (classified as
-    /// InvalidResponseShape by the caller) when the body is not the expected
-    /// envelope; entries without an id are dropped rather than surfaced as
-    /// unselectable blanks.
-    /// </summary>
+    /// <summary>Adapter: `/v1/models` body -> model list. Returns null when the body is not the expected envelope; entries without an id are dropped.</summary>
     public static List<ModelData> DeserializeModels(string json)
     {
         try
@@ -105,12 +91,7 @@ public class PromptEnhanceAPI
         }
     }
 
-    /// <summary>
-    /// Adapter: chat-completion body -> the first choice's trimmed message
-    /// content. Returns null (classified as InvalidResponseShape by the
-    /// caller) for malformed JSON, no choices, or blank content — a blank
-    /// "enhancement" must never silently replace the user's prompt.
-    /// </summary>
+    /// <summary>Adapter: chat-completion body -> the first choice's trimmed message content. Returns null for malformed JSON, no choices, or blank content.</summary>
     public static string DeserializeChatContent(string json)
     {
         try
@@ -126,11 +107,7 @@ public class PromptEnhanceAPI
         }
     }
 
-    /// <summary>
-    /// Pulls the readable message out of an OpenAI-style error envelope; when
-    /// the body isn't that shape, the raw excerpt is surfaced instead so the
-    /// backend's actual words always reach the user.
-    /// </summary>
+    /// <summary>Pulls the message out of an OpenAI-style error envelope; when the body isn't that shape, the raw excerpt is returned.</summary>
     public static string ExtractErrorMessage(string json)
     {
         ChatError error = ErrorHandler.TryParseErrorEnvelope(json);

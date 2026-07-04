@@ -1,7 +1,6 @@
 # PromptEnhance developer task runner
 # Run `just` to see available recipes.
 
-# Use PowerShell on Windows (no `sh` there); default to sh/bash elsewhere.
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 alias i := install
@@ -32,9 +31,7 @@ frontend-parity:
 frontend-test:
   npm run test:frontend
 
-# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout).
-# Refuses symlinked vendor paths: older layouts linked vendor into a sibling project, and
-# checkout/robocopy through the link would mutate that other repo's working tree.
+# Pin ./vendor/SwarmUI to the exact commit CI builds against (standalone workspace layout). Refuses symlinked vendor paths.
 [windows]
 vendor-sync:
   if ((Get-Item 'vendor' -Force -ErrorAction SilentlyContinue).LinkType -or (Get-Item 'vendor/SwarmUI' -Force -ErrorAction SilentlyContinue).LinkType) { Write-Error 'vendor or vendor/SwarmUI is a symlink/junction - refusing to touch it. Delete the link and re-run.'; exit 1 }
@@ -52,26 +49,21 @@ vendor-sync:
   git -C vendor/SwarmUI checkout -q --detach {{swarmui_pin}}
   git -C vendor/SwarmUI rev-parse HEAD
 
-# Make the vendored host a runnable dev install: seed Data/Settings.fds (skips the
-# installer; SwarmUI docs/Troubleshooting.md documents the IsInstalled key) and copy
-# this extension into the host's src/Extensions (the host only loads extensions from
-# there, and deletes bin/obj inside the folder on boot — a copy, never a junction).
+# Make the vendored host a runnable dev install: seed Data/Settings.fds and copy this extension into the host's src/Extensions (a copy, never a junction).
 [windows]
 vendor-dev: vendor-sync
   if (-not (Test-Path 'vendor/SwarmUI/Data')) { New-Item -ItemType Directory -Force 'vendor/SwarmUI/Data' | Out-Null }
   if (-not (Test-Path 'vendor/SwarmUI/Data/Settings.fds')) { Copy-Item 'scripts/vendor-dev-settings.fds' 'vendor/SwarmUI/Data/Settings.fds' }
   robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
 
-# Make the vendored host a runnable dev install (see the [windows] variant for why a copy)
+# Make the vendored host a runnable dev install (see the [windows] variant)
 [unix]
 vendor-dev: vendor-sync
   mkdir -p vendor/SwarmUI/Data
   if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
   rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
 
-# Live host boot gate: SwarmUI's own CI test mode (--ci_test) boots the real host,
-# dotnet-builds and loads this extension through the real lifecycle, self-shuts after
-# ~3s, and exits nonzero if anything logged an error. Port 7899 avoids a running Swarm.
+# Live host boot gate: SwarmUI's --ci_test boots the real host with this extension and exits nonzero on any logged error.
 [windows]
 vendor-ci-test port='7899': vendor-dev
   dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release

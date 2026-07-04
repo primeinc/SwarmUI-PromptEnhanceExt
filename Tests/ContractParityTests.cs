@@ -5,13 +5,7 @@ using SwarmUI.Accounts;
 
 namespace PromptEnhance.Tests;
 
-/// <summary>
-/// Pins every mirror of contracts/pe-contract.json — the single source of
-/// truth for values shared across the C# backend, the TypeScript frontend,
-/// and the tests — to the contract file itself. The frontend mirrors are
-/// pinned by the jsdom contract tests against the same file, so a change to
-/// either side without updating the contract (or vice versa) fails a gate.
-/// </summary>
+/// <summary>Pins every C# mirror of contracts/pe-contract.json to the contract file itself.</summary>
 public class ContractParityTests
 {
     internal static string RepoRoot()
@@ -19,8 +13,6 @@ public class ContractParityTests
         DirectoryInfo? dir = new(AppContext.BaseDirectory);
         while (dir != null)
         {
-            // Anchor on .git: build output can carry copies of repo files (the Web
-            // SDK content glob once swept contracts/ into Tests/bin), but never .git.
             if (Path.Exists(Path.Combine(dir.FullName, ".git"))
                 && File.Exists(Path.Combine(dir.FullName, "contracts", "pe-contract.json")))
             {
@@ -95,11 +87,6 @@ public class ContractParityTests
         }
     }
 
-    /// <summary>
-    /// Each contract key's declared `type` must be enforced by ValidateSettings:
-    /// the contract default (always type-correct) is accepted, and a canonical
-    /// wrong-type probe for that declared type is rejected.
-    /// </summary>
     [Xunit.Fact]
     public void ValidateSettings_EnforcesContractTypes()
     {
@@ -132,11 +119,6 @@ public class ContractParityTests
         Xunit.Assert.Equal("contract-probe", JObject.Parse(stored!)["model"]!.Value<string>());
     }
 
-    /// <summary>
-    /// The emitted frontend must carry the contract's route names and the
-    /// verbatim systemPrompt default — this bridges the contract to the exact
-    /// JavaScript SwarmUI serves (the parity gate bridges it back to Frontend/*.ts).
-    /// </summary>
     [Xunit.Fact]
     public void EmittedContractsJs_CarriesRoutesAndSystemPrompt()
     {
@@ -149,7 +131,7 @@ public class ContractParityTests
     }
 }
 
-/// <summary>Contract routes must be exactly what SwarmUI's real registry ends up holding (keys are lowercased by the host).</summary>
+/// <summary>Contract routes vs SwarmUI's real registry (keys are lowercased by the host).</summary>
 [Xunit.Collection(ApiRegistryCollectionDefinition.Name)]
 public class ContractRouteParityTests
 {
@@ -168,7 +150,7 @@ public class ContractRouteParityTests
     }
 }
 
-/// <summary>The SwarmUI ref CI builds and the ref the justfile vendors must be the same commit — enforced, not comment-enforced.</summary>
+/// <summary>The SwarmUI ref CI builds and the ref the justfile vendors must be the same commit.</summary>
 public class PinParityTests
 {
     [Xunit.Fact]
@@ -187,13 +169,6 @@ public class PinParityTests
         }
     }
 
-    /// <summary>
-    /// The ProjectReference Properties metadata must be byte-identical across
-    /// both csproj files: MSBuild creates one project instance per unique
-    /// global-property set, and two instances of SwarmUI.csproj race writing
-    /// the same obj output (intermittent CS2012). This pin turns the csproj
-    /// comment into an enforced invariant.
-    /// </summary>
     [Xunit.Fact]
     public void SwarmUIProjectReferenceProperties_IdenticalAcrossCsprojFiles()
     {

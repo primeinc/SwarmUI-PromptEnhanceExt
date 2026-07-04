@@ -1,9 +1,7 @@
 /**
- * Settings persistence and model-discovery UI for the PromptEnhance extension.
- *
- * Owns the settings panel, the Get/Save/Reset settings round-trips, and the
- * `/v1/models`-backed model dropdown. All wire data is normalized through the
- * contracts.ts adapters; no raw response object escapes this file's callbacks.
+ * Settings persistence and model-discovery UI for the PromptEnhance extension:
+ * the settings panel, the Get/Save/Reset settings round-trips, and the
+ * `/v1/models`-backed model dropdown.
  *
  * AUTHORITATIVE SOURCE: Frontend/settings.ts. The committed Assets/settings.js
  * is tsc build output — do not hand-edit it.
@@ -11,13 +9,7 @@
 
 window.PromptEnhance = window.PromptEnhance || {};
 
-/**
- * Display labels for the replace modes. The mode VALUES come from
- * PromptEnhance.REPLACE_MODES (contracts.ts, pinned to the contract enum);
- * the panel derives its options from that list, so a contract enum change
- * cannot leave the panel silently missing a mode. An unlabeled mode falls
- * back to its raw value.
- */
+/** Display labels for the replace modes. Values come from PromptEnhance.REPLACE_MODES (contracts.ts). An unlabeled mode falls back to its raw value. */
 const PE_MODE_LABELS: Record<PEReplaceMode, string> = {
     preview: 'Preview (Apply / Cancel)',
     append: 'Append (keep original)',
@@ -34,12 +26,7 @@ function peSetStatus(message: string, kind: string): void {
     el.className = 'pe-settings-status' + (kind ? ' ' + kind : '');
 }
 
-/**
- * Loads settings from the server into PromptEnhance.settings.
- * Failure is surfaced to the console and the client keeps its defaults —
- * a broken settings store degrades to defaults visibly, never to a crash
- * that would take the Enhance button with it.
- */
+/** Loads settings from the server into PromptEnhance.settings. On failure the client keeps its defaults and logs to console. */
 function peLoadSettings(): Promise<void> {
     return new Promise((resolve) => {
         genericRequest(PE_ROUTES.getSettings, {}, (data) => {
@@ -60,16 +47,7 @@ function peLoadSettings(): Promise<void> {
     });
 }
 
-/**
- * DOM adapter: reads the panel fields into a full PESettings value.
- * Missing or non-numeric fields fall back to the current effective settings.
- * Numeric clamps come from PE_LIMITS (contracts.ts, mirroring
- * contracts/pe-contract.json — the same bounds ValidateSettings enforces
- * server-side; maxTokens' int.MaxValue ceiling is not mirrored). An empty
- * model selection means "keep the current model": the dropdown has no
- * affordance for clearing a model, so an unpopulated or placeholder
- * selection must never erase one.
- */
+/** DOM adapter: reads the panel fields into a full PESettings value. Missing or non-numeric fields fall back to the current effective settings; numeric fields clamp to PE_LIMITS; an empty model selection keeps the current model. */
 function peReadPanelValues(): PESettings {
     const current = peEffectiveSettings();
     const num = (id: string, fallback: number): number => {
@@ -141,12 +119,7 @@ function peResetSettings(): Promise<boolean> {
     });
 }
 
-/**
- * Populates the model dropdown from the backend's `/v1/models` discovery
- * route. Every failure mode (unreachable, HTTP error, empty list, transport
- * error) lands as a visible disabled option plus a status-line message —
- * never an empty dropdown with no explanation.
- */
+/** Populates the model dropdown from the backend's `/v1/models` discovery route. Every failure mode lands as a visible disabled option plus a status-line message. */
 function peFetchModels(): Promise<void> {
     const select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
     if (!select) {
@@ -289,11 +262,7 @@ function peBuildSettingsPanel(): HTMLElement {
     return panel;
 }
 
-/**
- * Opens the panel and refreshes the model list. The fetch must run on every
- * open: the dropdown otherwise holds only the static placeholder, and a Save
- * would read an empty selection instead of the configured model.
- */
+/** Opens the panel, populates it, and refreshes the model list. */
 function peOpenSettingsPanel(): void {
     const panel = peBuildSettingsPanel();
     pePopulatePanel();
