@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # xunit.v3 >=3.2.0 bundles MTP telemetry; suppress it on every gate surface, matching the justfile.
+  TESTINGPLATFORM_TELEMETRY_OPTOUT: '1'
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}

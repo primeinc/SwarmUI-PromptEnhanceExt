@@ -67,24 +67,29 @@ vendor-dev: vendor-sync
   if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
   rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
 
-# Bump the SwarmUI pin in every mirror atomically (justfile + gates.yml), resync vendor, rerun the gate.
-# PinParityTests proves the mirrors agree; backend-test proves the extension still holds at the new pin.
+# Bump the SwarmUI pin in every mirror in one recipe (justfile + gates.yml), resync vendor, rerun
+# the gates including the live host boot. Not transactional: a partial failure leaves the mirrors
+# desynced, and PinParityTests catches that on the next run. Only checkout blocks belonging to
+# repository mcmonkeyprojects/SwarmUI are rewritten; the sha is validated by just itself ([arg]
+# pattern, requires just >= 1.45 — older just fails to parse the attribute) before any shell sees it.
 [windows]
+[arg('sha', pattern='[0-9a-f]{40}')]
 vendor-bump sha:
-  if ('{{sha}}' -notmatch '^[0-9a-f]{40}$') { Write-Error 'vendor-bump needs a full 40-char lowercase commit SHA'; exit 1 }
-  (Get-Content justfile -Raw) -replace 'swarmui_pin := "[0-9a-f]{40}"', 'swarmui_pin := "{{sha}}"' | Set-Content justfile -NoNewline
-  (Get-Content .github/workflows/gates.yml -Raw) -replace 'ref: [0-9a-f]{40}', 'ref: {{sha}}' | Set-Content .github/workflows/gates.yml -NoNewline
+  [IO.File]::WriteAllText('justfile', ([IO.File]::ReadAllText('justfile') -replace 'swarmui_pin := "[0-9a-f]{40}"', 'swarmui_pin := "{{sha}}"'), [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText('.github/workflows/gates.yml', ([IO.File]::ReadAllText('.github/workflows/gates.yml') -replace '(repository: mcmonkeyprojects/SwarmUI\s*\r?\n\s*ref: )[0-9a-f]{40}', '${1}{{sha}}'), [Text.UTF8Encoding]::new($false))
   just vendor-sync
   just backend-test
+  just vendor-ci-test
 
-# Bump the SwarmUI pin in every mirror atomically (see the [windows] variant)
+# Bump the SwarmUI pin in every mirror in one recipe (see the [windows] variant)
 [unix]
+[arg('sha', pattern='[0-9a-f]{40}')]
 vendor-bump sha:
-  printf '%s' '{{sha}}' | grep -Eq '^[0-9a-f]{40}$' || { echo 'vendor-bump needs a full 40-char lowercase commit SHA' >&2; exit 1; }
-  sed -i -E 's/swarmui_pin := "[0-9a-f]{40}"/swarmui_pin := "{{sha}}"/' justfile
-  sed -i -E 's/ref: [0-9a-f]{40}/ref: {{sha}}/' .github/workflows/gates.yml
+  perl -0pi -e 's{swarmui_pin := "[0-9a-f]\{40\}"}{swarmui_pin := "{{sha}}"}' justfile
+  perl -0pi -e 's{(repository: mcmonkeyprojects/SwarmUI\s*\n\s*ref: )[0-9a-f]\{40\}}{${1}{{sha}}}g' .github/workflows/gates.yml
   just vendor-sync
   just backend-test
+  just vendor-ci-test
 
 # Live host boot gate: SwarmUI's --ci_test boots the real host with this extension and exits nonzero on any logged error.
 [windows]
@@ -106,8 +111,10 @@ backend-build:
 # Platform disposition: BOTH platforms live, on xunit.v3 3.2.2 + runner 3.1.5.
 #   A) VSTest via plain `dotnet test` (default while VSTest packages are referenced);
 #      zero-test runs fail via Tests/.runsettings TreatNoTestsAsError.
-#   B) MTP via `dotnet test -p:TestingPlatformDotnetTestSupport=true` (the documented
-#      .NET 8/9 SDK mechanism); MTP fails zero-test runs by default (exit 8).
+#   B) MTP via `dotnet test -p:TestingPlatformDotnetTestSupport=true` — the property is the
+#      documented .NET 8/9 SDK mechanism; applying it per-invocation (instead of hard-set in
+#      the csproj as upstream's template does) is our pattern, not upstream's, kept so both
+#      dotnet test modes stay live. MTP fails zero-test runs by default (exit 8).
 #   C) MTP via the stand-alone test executable (`dotnet run`), enabled by
 #      UseMicrosoftTestingPlatformRunner in the Tests csproj.
 # Endgame, in order: when the SwarmUI host flips to net10/SDK 10 (it already warns .NET 10

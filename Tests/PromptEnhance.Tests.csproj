@@ -13,7 +13,7 @@
     <IsTestProject>true</IsTestProject>
     <!-- Project-anchored path: the gates invoke `dotnet test` from the repo root,
          and MSBuild passes this value to VSTest unresolved. -->
-    <RunSettingsFilePath>$(MSBuildProjectDirectory)\.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)/.runsettings</RunSettingsFilePath>
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

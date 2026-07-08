@@ -68,8 +68,12 @@ The individual gates, runnable from the extension directory in either layout:
 npm ci
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
 npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js, real jsdom
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite against the real SwarmUI host
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
+dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
 ```
+
+The C# suite runs on xunit.v3 and is gated on both test platforms; the `justfile` (`backend-test`, `backend-test-mtp`, `backend-test-exe`) is the gate registry.
 
 Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
 

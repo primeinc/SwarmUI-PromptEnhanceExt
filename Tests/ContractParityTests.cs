@@ -161,11 +161,39 @@ public class PinParityTests
         string justfile = File.ReadAllText(Path.Combine(root, "justfile"));
         Match justPin = Regex.Match(justfile, "swarmui_pin\\s*:=\\s*\"([0-9a-f]{40})\"");
         Xunit.Assert.True(justPin.Success, "justfile must define swarmui_pin as a full 40-char SHA.");
-        MatchCollection gatesPins = Regex.Matches(gates, @"ref:\s*([0-9a-f]{40})");
-        Xunit.Assert.True(gatesPins.Count >= 1, "gates.yml must pin the SwarmUI host to a full 40-char SHA.");
+        // Anchored to the SwarmUI checkout blocks: a future SHA-pinned checkout of any
+        // other repository is neither forced to this pin nor rewritten by vendor-bump.
+        MatchCollection gatesPins = Regex.Matches(gates, @"repository: mcmonkeyprojects/SwarmUI\s*\r?\n\s*ref:\s*([0-9a-f]{40})");
+        Xunit.Assert.True(gatesPins.Count >= 1, "gates.yml must pin the SwarmUI host checkout to a full 40-char SHA.");
         foreach (Match pin in gatesPins)
         {
             Xunit.Assert.Equal(justPin.Groups[1].Value, pin.Groups[1].Value);
+        }
+    }
+
+    [Xunit.Fact]
+    public void VendoredPropertyGroup_MirrorsSwarmUIExtensionProps()
+    {
+        string root = ContractParityTests.RepoRoot();
+        string propsPath = Path.Combine(root, "vendor", "SwarmUI", "src", "SwarmUI.extension.props");
+        if (!File.Exists(propsPath))
+        {
+            propsPath = Path.GetFullPath(Path.Combine(root, "..", "..", "SwarmUI.extension.props"));
+        }
+        Xunit.Assert.True(File.Exists(propsPath),
+            $"No SwarmUI.extension.props found in the vendored or host layout ({propsPath}) — the vendored PropertyGroup mirror cannot be verified.");
+        string props = File.ReadAllText(propsPath);
+        string csproj = File.ReadAllText(Path.Combine(root, "PromptEnhance.csproj"));
+        MatchCollection expected = Regex.Matches(
+            Regex.Match(props, @"<PropertyGroup>[\s\S]*?</PropertyGroup>").Value,
+            @"<(\w+)>([^<]*)</\1>");
+        Xunit.Assert.True(expected.Count >= 5, "SwarmUI.extension.props no longer defines the property block this mirror check expects.");
+        foreach (Match property in expected)
+        {
+            Match actual = Regex.Match(csproj, $"<{property.Groups[1].Value}>([^<]*)</{property.Groups[1].Value}>");
+            Xunit.Assert.True(actual.Success,
+                $"PromptEnhance.csproj's vendored PropertyGroup is missing <{property.Groups[1].Value}>, which SwarmUI.extension.props defines at the current pin.");
+            Xunit.Assert.Equal(property.Groups[2].Value, actual.Groups[1].Value);
         }
     }
 

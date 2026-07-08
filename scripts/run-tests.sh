@@ -2,6 +2,9 @@
 # Runs every committed validation gate in the host layout (<SwarmUI>/src/Extensions/PromptEnhance).
 set -euo pipefail
 
+# xunit.v3 >=3.2.0 bundles MTP telemetry; suppress it here as on the other gate surfaces.
+export TESTINGPLATFORM_TELEMETRY_OPTOUT=1
+
 HOST="${SWARMUI_ROOT:?Set SWARMUI_ROOT to a SwarmUI checkout (git clone https://github.com/mcmonkeyprojects/SwarmUI)}"
 if [ ! -f "$HOST/src/SwarmUI.csproj" ]; then
     echo "[run-tests] SWARMUI_ROOT ($HOST) is not a SwarmUI checkout — no src/SwarmUI.csproj found." >&2
