@@ -27,4 +27,10 @@ echo "[run-tests] Frontend suite (compiled TypeScript tests against the emitted 
 echo "[run-tests] C# suite (dotnet test against the real SwarmUI host)…"
 dotnet test "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug
 
+echo "[run-tests] C# suite (Microsoft Testing Platform via dotnet test)…"
+dotnet test "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug -p:TestingPlatformDotnetTestSupport=true
+
+echo "[run-tests] C# suite (Microsoft Testing Platform stand-alone executable)…"
+dotnet run --project "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug
+
 echo "[run-tests] OK — all gates passed."

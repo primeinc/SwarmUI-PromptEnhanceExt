@@ -11,6 +11,9 @@ alias c := check
 backend_project := "PromptEnhance.csproj"
 backend_test_project := "Tests/PromptEnhance.Tests.csproj"
 
+# xunit.v3 >=3.2.0 bundles MTP telemetry; documented opt-out keeps runs deterministic.
+export TESTINGPLATFORM_TELEMETRY_OPTOUT := "1"
+
 # Must match the SwarmUI ref pinned in .github/workflows/gates.yml — PinParityTests
 # (Tests/ContractParityTests.cs) fails on drift. Bump via `just vendor-bump <sha>`, never by hand.
 swarmui_pin := "10258d354d2ffed150a2c4ee272887aa62a5ef3c"
@@ -99,22 +102,35 @@ vendor-ci-test port='7899': vendor-dev
 backend-build:
   dotnet build {{backend_project}} -v minimal --nologo
 
-# Run backend C# tests.
-# Platform disposition: VSTest, deliberately — xunit 2.9.2 + runner 3.1.5 (the 3.x runner runs
-# v2 tests on .NET 8+). Zero-test runs fail via Tests/.runsettings TreatNoTestsAsError; VSTest
-# is green-on-zero by default. Endgame: the SwarmUI host already warns .NET 10 "will be required
-# in a future version" (src/Utils/Utilities.cs CheckDotNet, called from Program.cs Main) — when
-# the host TFM flips to net10, migrate xunit v2 -> v3 and enable MTP-mode dotnet test via
-# global.json {"test":{"runner":"Microsoft.Testing.Platform"}}. v2-on-MTP exists only as an
-# unofficial third-party package, barred by the vendor-first standing rule.
+# Run backend C# tests (path A: VSTest-mode dotnet test).
+# Platform disposition: BOTH platforms live, on xunit.v3 3.2.2 + runner 3.1.5.
+#   A) VSTest via plain `dotnet test` (default while VSTest packages are referenced);
+#      zero-test runs fail via Tests/.runsettings TreatNoTestsAsError.
+#   B) MTP via `dotnet test -p:TestingPlatformDotnetTestSupport=true` (the documented
+#      .NET 8/9 SDK mechanism); MTP fails zero-test runs by default (exit 8).
+#   C) MTP via the stand-alone test executable (`dotnet run`), enabled by
+#      UseMicrosoftTestingPlatformRunner in the Tests csproj.
+# Endgame, in order: when the SwarmUI host flips to net10/SDK 10 (it already warns .NET 10
+# "will be required in a future version" — src/Utils/Utilities.cs CheckDotNet), switch B to
+# global.json {"test":{"runner":"Microsoft.Testing.Platform"}} and retire the property; move
+# to the xunit.v3 4.x/MTP-v2 line when it leaves pre-release; drop the VSTest packages only
+# when every consuming runner speaks MTP (upstream guidance).
 backend-test:
   dotnet test {{backend_test_project}} -c Debug -v minimal --nologo
+
+# Run backend C# tests (path B: MTP through dotnet test, .NET 8/9 SDK mechanism)
+backend-test-mtp:
+  dotnet test {{backend_test_project}} -c Debug -v minimal --nologo -p:TestingPlatformDotnetTestSupport=true
+
+# Run backend C# tests (path C: the stand-alone MTP executable)
+backend-test-exe:
+  dotnet run --project {{backend_test_project}} -c Debug
 
 # Build everything
 build: frontend-build backend-build
 
 # Run all tests
-test: frontend-test backend-test
+test: frontend-test backend-test backend-test-mtp backend-test-exe
 
 # Validation gate used before commit
 check: frontend-parity test
