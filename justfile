@@ -11,8 +11,9 @@ alias c := check
 backend_project := "PromptEnhance.csproj"
 backend_test_project := "Tests/PromptEnhance.Tests.csproj"
 
-# Must match the SwarmUI ref pinned in .github/workflows/gates.yml — bump both together.
-swarmui_pin := "9c81c1cbcb5f256508e186fd3b4faa873c139b7d"
+# Must match the SwarmUI ref pinned in .github/workflows/gates.yml — PinParityTests
+# (Tests/ContractParityTests.cs) fails on drift. Bump via `just vendor-bump <sha>`, never by hand.
+swarmui_pin := "10258d354d2ffed150a2c4ee272887aa62a5ef3c"
 swarmui_url := "https://github.com/mcmonkeyprojects/SwarmUI"
 
 # Install Node dev dependencies
@@ -63,6 +64,25 @@ vendor-dev: vendor-sync
   if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
   rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
 
+# Bump the SwarmUI pin in every mirror atomically (justfile + gates.yml), resync vendor, rerun the gate.
+# PinParityTests proves the mirrors agree; backend-test proves the extension still holds at the new pin.
+[windows]
+vendor-bump sha:
+  if ('{{sha}}' -notmatch '^[0-9a-f]{40}$') { Write-Error 'vendor-bump needs a full 40-char lowercase commit SHA'; exit 1 }
+  (Get-Content justfile -Raw) -replace 'swarmui_pin := "[0-9a-f]{40}"', 'swarmui_pin := "{{sha}}"' | Set-Content justfile -NoNewline
+  (Get-Content .github/workflows/gates.yml -Raw) -replace 'ref: [0-9a-f]{40}', 'ref: {{sha}}' | Set-Content .github/workflows/gates.yml -NoNewline
+  just vendor-sync
+  just backend-test
+
+# Bump the SwarmUI pin in every mirror atomically (see the [windows] variant)
+[unix]
+vendor-bump sha:
+  printf '%s' '{{sha}}' | grep -Eq '^[0-9a-f]{40}$' || { echo 'vendor-bump needs a full 40-char lowercase commit SHA' >&2; exit 1; }
+  sed -i -E 's/swarmui_pin := "[0-9a-f]{40}"/swarmui_pin := "{{sha}}"/' justfile
+  sed -i -E 's/ref: [0-9a-f]{40}/ref: {{sha}}/' .github/workflows/gates.yml
+  just vendor-sync
+  just backend-test
+
 # Live host boot gate: SwarmUI's --ci_test boots the real host with this extension and exits nonzero on any logged error.
 [windows]
 vendor-ci-test port='7899': vendor-dev
@@ -79,7 +99,14 @@ vendor-ci-test port='7899': vendor-dev
 backend-build:
   dotnet build {{backend_project}} -v minimal --nologo
 
-# Run backend C# tests
+# Run backend C# tests.
+# Platform disposition: VSTest, deliberately — xunit 2.9.2 + runner 3.1.5 (the 3.x runner runs
+# v2 tests on .NET 8+). Zero-test runs fail via Tests/.runsettings TreatNoTestsAsError; VSTest
+# is green-on-zero by default. Endgame: the SwarmUI host already warns .NET 10 "will be required
+# in a future version" (src/Utils/Utilities.cs CheckDotNet, called from Program.cs Main) — when
+# the host TFM flips to net10, migrate xunit v2 -> v3 and enable MTP-mode dotnet test via
+# global.json {"test":{"runner":"Microsoft.Testing.Platform"}}. v2-on-MTP exists only as an
+# unofficial third-party package, barred by the vendor-first standing rule.
 backend-test:
   dotnet test {{backend_test_project}} -c Debug -v minimal --nologo
 

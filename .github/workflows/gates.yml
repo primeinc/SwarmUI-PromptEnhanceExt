@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mcmonkeyprojects/SwarmUI
-          ref: 9c81c1cbcb5f256508e186fd3b4faa873c139b7d
+          ref: 10258d354d2ffed150a2c4ee272887aa62a5ef3c
           path: SwarmUI
       - uses: actions/checkout@v4
         with:
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mcmonkeyprojects/SwarmUI
-          ref: 9c81c1cbcb5f256508e186fd3b4faa873c139b7d
+          ref: 10258d354d2ffed150a2c4ee272887aa62a5ef3c
           path: vendor/SwarmUI
       - uses: actions/setup-dotnet@v4
         with:
