@@ -8,6 +8,10 @@ interface PromptGeometry {
     promptBottom: number;
     negativeBottom: number;
     splitterTop: number;
+    /** `offsetHeight` of `#alt_prompt_extra_area`: the figure SwarmUI's region offset uses. */
+    extraAreaOffsetHeight: number;
+    /** Distance from the top of the region's content box to the prompt main line: the space the offset has to cover. */
+    extraAreaRenderedHeight: number;
 }
 
 /** Measures where both prompt boxes end relative to the bottom panel's splitter bar. */
@@ -20,10 +24,20 @@ async function measure(page: Page): Promise<PromptGeometry> {
             }
             return elem.getBoundingClientRect();
         };
+        const region = document.getElementById('alt_prompt_region');
+        const area = document.getElementById('alt_prompt_extra_area');
+        const mainLine = document.querySelector('#alt_prompt_region .alt_prompt_main_line');
+        if (!region || !area || !mainLine) {
+            throw new Error('missing prompt region structure');
+        }
+        const regionStyle = getComputedStyle(region);
+        const contentTop = region.getBoundingClientRect().top + Number.parseFloat(regionStyle.borderTopWidth) + Number.parseFloat(regionStyle.paddingTop);
         return {
             promptBottom: rect('alt_prompt_textbox').bottom,
             negativeBottom: rect('alt_negativeprompt_textbox').bottom,
             splitterTop: rect('t2i-mid-split-bar').top,
+            extraAreaOffsetHeight: area.offsetHeight,
+            extraAreaRenderedHeight: mainLine.getBoundingClientRect().top - contentTop,
         };
     });
 }
@@ -32,6 +46,7 @@ async function measure(page: Page): Promise<PromptGeometry> {
 function expectPromptBoxesClear(geometry: PromptGeometry): void {
     expect(geometry.promptBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry.splitterTop);
     expect(geometry.negativeBottom, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry.splitterTop);
+    expect(Math.abs(geometry.extraAreaRenderedHeight - geometry.extraAreaOffsetHeight), `no margin escapes #alt_prompt_extra_area: ${JSON.stringify(geometry)}`).toBeLessThan(1);
 }
 
 /** Runs SwarmUI's prompt-region layout pass and waits two frames for it to apply. */
@@ -56,12 +71,12 @@ test('control: without the extension UI the prompt boxes clear the bottom panel'
     expectPromptBoxesClear(await measure(page));
 });
 
-test.fail('the Enhance bar does not push the prompt boxes under the bottom panel', async ({ page }) => {
+test('the Enhance bar does not push the prompt boxes under the bottom panel', async ({ page }) => {
     await page.screenshot({ path: path.join(shotDir, 'prompt-region-bar.png') });
     expectPromptBoxesClear(await measure(page));
 });
 
-test.fail('an open enhancement preview does not push the prompt boxes under the bottom panel', async ({ page }) => {
+test('an open enhancement preview does not push the prompt boxes under the bottom panel', async ({ page }) => {
     await page.locator('#alt_prompt_textbox').fill('a lighthouse at dusk');
     await page.evaluate(() => {
         const preview = document.getElementById('pe_preview');

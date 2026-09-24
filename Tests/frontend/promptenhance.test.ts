@@ -27,7 +27,11 @@ const CONTRACT: PEContractFile = JSON.parse(
 
 const PAGE_HTML = `<!DOCTYPE html><html><body>
   <div class="current_image drag_image_target" id="current_image"></div>
-  <div class="alt_prompt_region drag_image_target" id="alt_prompt_region">
+  <div class="alt_prompt_region drag_image_target drag_audio_target" id="alt_prompt_region">
+    <div id="alt_prompt_extra_area" class="alt_prompt_extra_area">
+      <button id="alt_prompt_image_clear_button" style="display: none;">Clear Attachments</button>
+      <div class="added-image-area alt-prompt-added-image-area" id="alt_prompt_image_area"></div>
+    </div>
     <div class="alt_prompt_main_line">
       <div class="alt_prompt_textboxes">
         <textarea id="alt_prompt_textbox" rows="1"></textarea>
@@ -62,6 +66,7 @@ interface BootOpts {
     fetch?: (url: string) => Promise<{ blob(): Promise<Blob> }>;
     pageHtml?: string;
     throwingShowError?: boolean;
+    genTabLayout?: SwarmGenTabLayout;
 }
 
 type PETestWindow = DOMWindow & {
@@ -120,6 +125,9 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         realConsoleWarn(...args);
     }) as typeof win.console.warn;
     win.triggerChangeFor = () => { };
+    if (opts.genTabLayout) {
+        (win as unknown as { genTabLayout: SwarmGenTabLayout }).genTabLayout = opts.genTabLayout;
+    }
     if (opts.fetch) {
         win.fetch = opts.fetch as unknown as typeof win.fetch;
     }
@@ -155,14 +163,15 @@ function test(name: string, fn: () => void | Promise<void>): void {
     tests.push({ name, fn });
 }
 
-test('Injects a REAL button bar into the REAL .alt_prompt_region and parses its markup', async () => {
+test('Injects a REAL button bar at the top of #alt_prompt_extra_area and parses its markup', async () => {
     const { win, doc } = await boot({});
     win.peAddPromptButtons();
 
     const bar = doc.getElementById('pe_button_bar');
     assert.ok(bar, '#pe_button_bar must exist as a real element after injection');
-    const region = doc.getElementById('alt_prompt_region')!;
-    assert.ok(region.contains(bar), '#pe_button_bar must be a real child of .alt_prompt_region');
+    const area = doc.getElementById('alt_prompt_extra_area')!;
+    assert.strictEqual(area.firstElementChild, bar, '#pe_button_bar must be the first child of #alt_prompt_extra_area');
+    assert.strictEqual(bar.nextElementSibling, doc.getElementById('pe_preview'), '#pe_preview must follow the bar inside #alt_prompt_extra_area');
 
     const enhance = doc.getElementById('pe_enhance_btn');
     assert.ok(enhance, '#pe_enhance_btn must be a real parsed element (proves innerHTML was really parsed)');
@@ -525,11 +534,27 @@ test('peEnsureButtons retries until the Generate-tab region appears (async Swarm
     win.peEnsureButtons();
     assert.strictEqual(doc.getElementById('pe_button_bar'), null, 'no bar while the region is absent');
     const region = doc.createElement('div');
-    region.className = 'alt_prompt_region';
-    region.innerHTML = '<textarea id="alt_prompt_textbox"></textarea>';
+    region.id = 'alt_prompt_region';
+    region.innerHTML = '<div id="alt_prompt_extra_area"></div><textarea id="alt_prompt_textbox"></textarea>';
     doc.body.appendChild(region);
     await new Promise((resolve) => setTimeout(resolve, 600));
     assert.ok(doc.getElementById('pe_button_bar'), 'the retry loop injects the bar once the region exists');
+});
+
+test('Every change to the extension UI height asks SwarmUI to re-offset the prompt region', async () => {
+    let relayouts = 0;
+    const { win, doc } = await boot({ prompt: 'a cat', settings: { replaceMode: 'preview' }, genTabLayout: { altPromptSizeHandle: () => { relayouts++; } } });
+    assert.ok(doc.getElementById('pe_button_bar'), 'startup mounted the bar');
+    assert.ok(relayouts > 0, 'mounting the bar must call genTabLayout.altPromptSizeHandle()');
+    const expectRelayout = (action: string, run: () => void | Promise<void>) => async () => {
+        const before = relayouts;
+        await run();
+        assert.ok(relayouts > before, `${action} must call genTabLayout.altPromptSizeHandle()`);
+    };
+    await expectRelayout('opening the preview', () => win.peHandleEnhance())();
+    assert.strictEqual(doc.getElementById('pe_preview')!.style.display, 'block', 'the preview is open');
+    await expectRelayout('applying the preview (shows Restore, hides preview)', () => doc.getElementById('pe_preview_apply')!.click())();
+    await expectRelayout('restoring (hides Restore)', () => doc.getElementById('pe_restore_btn')!.click())();
 });
 
 test('peShowError still reaches the user when the host showError itself throws', async () => {

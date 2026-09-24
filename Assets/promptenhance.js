@@ -108,6 +108,12 @@ function peApplyEnhancement(original, enhanced) {
     }
     peShowPreview(original, enhanced);
 }
+/** Re-offsets SwarmUI's prompt region after the extension changes the height of `#alt_prompt_extra_area` (layout.js `altPromptSizeHandle`). */
+function peRelayout() {
+    if (typeof genTabLayout !== 'undefined') {
+        genTabLayout.altPromptSizeHandle();
+    }
+}
 function peShowPreview(original, enhanced) {
     PromptEnhance.pending = { original, enhanced };
     const preview = document.getElementById('pe_preview');
@@ -115,6 +121,7 @@ function peShowPreview(original, enhanced) {
     if (preview && text) {
         text.textContent = enhanced;
         preview.style.display = 'block';
+        peRelayout();
     }
 }
 function peHidePreview() {
@@ -122,18 +129,21 @@ function peHidePreview() {
     const preview = document.getElementById('pe_preview');
     if (preview) {
         preview.style.display = 'none';
+        peRelayout();
     }
 }
 function peShowRestore() {
     const btn = document.getElementById('pe_restore_btn');
     if (btn) {
         btn.style.display = 'inline-block';
+        peRelayout();
     }
 }
 function peHideRestore() {
     const btn = document.getElementById('pe_restore_btn');
     if (btn) {
         btn.style.display = 'none';
+        peRelayout();
     }
 }
 /** The Enhance click flow: validate input, optionally attach the selected image, run the backend round-trip, apply the result. Reentrancy is guarded; the loading state clears on every path. */
@@ -177,10 +187,13 @@ async function peHandleEnhance() {
         peSetLoading(false);
     }
 }
-/** Injects the button bar and preview panel into SwarmUI's Generate-tab prompt region. Idempotent. */
+/**
+ * Injects the button bar and preview panel at the top of `#alt_prompt_extra_area`, the one part of
+ * SwarmUI's prompt region whose height the region offset accounts for. Idempotent.
+ */
 function peAddPromptButtons() {
-    const region = document.querySelector('.alt_prompt_region');
-    if (!region || document.getElementById('pe_button_bar')) {
+    const area = document.getElementById('alt_prompt_extra_area');
+    if (!area || document.getElementById('pe_button_bar')) {
         return;
     }
     const bar = document.createElement('div');
@@ -204,8 +217,9 @@ function peAddPromptButtons() {
             <button type="button" class="pe-preview-cancel" id="pe_preview_cancel">Cancel</button>
         </div>
     `;
-    region.insertBefore(preview, region.firstChild);
-    region.insertBefore(bar, region.firstChild);
+    area.insertBefore(preview, area.firstChild);
+    area.insertBefore(bar, area.firstChild);
+    peRelayout();
     bar.querySelector('#pe_enhance_btn').addEventListener('click', peHandleEnhance);
     bar.querySelector('#pe_settings_button').addEventListener('click', (e) => {
         e.preventDefault();
@@ -231,9 +245,9 @@ function peAddPromptButtons() {
     });
     preview.querySelector('#pe_preview_cancel').addEventListener('click', peHidePreview);
 }
-/** Polls for `.alt_prompt_region` (every 250ms, up to ~10s) and injects the buttons when it appears. */
+/** Polls for `#alt_prompt_extra_area` (every 250ms, up to ~10s) and injects the buttons when it appears. */
 function peEnsureButtons(attempt = 0) {
-    if (document.querySelector('.alt_prompt_region')) {
+    if (document.getElementById('alt_prompt_extra_area')) {
         peAddPromptButtons();
         return;
     }
