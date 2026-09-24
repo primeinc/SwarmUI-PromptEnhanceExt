@@ -170,7 +170,7 @@ Parallel output is interleaved; `just` names the recipe that failed on its last 
 
 The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it.
 
-CI (`.github/workflows/gates.yml`) runs these gates on every push, the C# suite in both layouts, plus a `browser` job: the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
+CI (`.github/workflows/gates.yml`) runs two jobs on every push that touches more than `docs/` or `LICENSE`. The `gates` job runs `just check`, type-checks the browser specs, and runs the C# suite through all three runner paths again in the host layout. The `browser` job runs the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
 
 ### Running the real host
 
