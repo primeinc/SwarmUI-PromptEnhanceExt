@@ -16,7 +16,7 @@ export TESTINGPLATFORM_TELEMETRY_OPTOUT := "1"
 
 # Must match the SwarmUI ref pinned in .github/workflows/gates.yml — PinParityTests
 # (Tests/ContractParityTests.cs) fails on drift. Bump via `just vendor-bump <sha>`, never by hand.
-swarmui_pin := "10258d354d2ffed150a2c4ee272887aa62a5ef3c"
+swarmui_pin := "96a4c3d14a31776bab5e3300301e078c15875f22"
 swarmui_url := "https://github.com/mcmonkeyprojects/SwarmUI"
 
 # Install Node dev dependencies
