@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Zero discovered/executed tests must fail the run: a silent discovery
+         regression (runner package loss, adapter failure, filter typo) would
+         otherwise leave every gate green while running nothing. -->
+    <TreatNoTestsAsError>true</TreatNoTestsAsError>
+  </RunConfiguration>
+</RunSettings>

@@ -1,0 +1,6 @@
+IsInstalled: true
+InstallDate: 2026-07-02
+InstallVersion: vendored-dev
+LaunchMode: none
+Maintenance:
+    CheckForUpdates: false

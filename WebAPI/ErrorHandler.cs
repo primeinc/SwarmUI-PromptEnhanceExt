@@ -1,13 +1,11 @@
 using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// The extension's closed error taxonomy. Every backend failure the extension
-/// can encounter is classified into exactly one of these categories; API
-/// responses carry the snake_case code from <see cref="ErrorHandler.CategoryCode"/>
-/// plus user-actionable text from <see cref="ErrorHandler.Format"/>.
-/// </summary>
+/// <summary>The extension's closed error taxonomy. API responses carry the snake_case code from <see cref="ErrorHandler.CategoryCode"/> plus text from <see cref="ErrorHandler.Format"/>.</summary>
 public enum PromptEnhanceErrorCategory
 {
     ServerUnavailable,
@@ -38,13 +36,7 @@ public static class ErrorHandler
         _ => "generic"
     };
 
-    /// <summary>
-    /// User-facing recovery text for a category, optionally followed by an
-    /// excerpt of the raw backend detail. Every message names the concrete
-    /// action the user can take (fix the URL, pick a model, raise the timeout,
-    /// disable image sending, ...) — classification without a recovery path
-    /// would just be a fancier way to be broken.
-    /// </summary>
+    /// <summary>User-facing recovery text for a category, optionally followed by an excerpt of the raw backend detail.</summary>
     public static string Format(PromptEnhanceErrorCategory category, string detail = null)
     {
         string baseMessage = category switch
@@ -64,18 +56,13 @@ public static class ErrorHandler
             PromptEnhanceErrorCategory.HttpError =>
                 "The LLM backend returned an error response.",
             PromptEnhanceErrorCategory.Authentication =>
-                "The LLM backend rejected the request as unauthorized. This extension sends no API key; point the Base URL at an OpenAI-compatible server that does not require authentication (a local server such as Ollama, LM Studio, or llama.cpp).",
+                "The LLM backend rejected the request as unauthorized. Set or correct its API key under User → API Keys → PromptEnhance LLM Server.",
             _ => "Something went wrong talking to the LLM backend."
         };
         return string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage}\n\nDetail: {Excerpt(detail)}";
     }
 
-    /// <summary>
-    /// Classifies an HTTP non-success status. 404 maps to ModelMissing because
-    /// OpenAI-compatible servers commonly 404 both unknown routes and unknown
-    /// models; 401/403 map to Authentication; 5xx to ServerUnavailable;
-    /// anything unrecognized stays a generic HttpError rather than guessing.
-    /// </summary>
+    /// <summary>Classifies an HTTP non-success status: 401/403 → Authentication, 404 → ModelMissing, 408/504 → Timeout, 413/422 → UnsupportedImage, 500/502/503 → ServerUnavailable, else HttpError.</summary>
     public static PromptEnhanceErrorCategory CategorizeHttpStatus(HttpStatusCode status) => status switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => PromptEnhanceErrorCategory.Authentication,
@@ -86,24 +73,40 @@ public static class ErrorHandler
         _ => PromptEnhanceErrorCategory.HttpError
     };
 
-    /// <summary>
-    /// Heuristic for reclassifying a 400 on a request that carried media:
-    /// OpenAI-compatible servers phrase image rejection inconsistently, so a
-    /// body mentioning image/vision/multimodal is treated as UnsupportedImage.
-    /// Only consulted when media was actually attached (see BackendClient).
-    /// </summary>
+    private static readonly Regex ImageRejectionPattern = new(@"(?<![a-zA-Z0-9])(?:images?|visions?|multimodal|image_url)(?![a-zA-Z0-9])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Case-insensitive deserialization options shared by every OpenAI-compatible wire-shape parse in the extension.</summary>
+    internal static readonly JsonSerializerOptions WireOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Token-scans an error body for image/vision/multimodal terms. When the body is an OpenAI error envelope only error.message, error.type, and error.code are scanned; the raw body is scanned only when the envelope shape is absent.</summary>
     public static bool LooksLikeImageRejection(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
         {
             return false;
         }
-        return body.Contains("image", StringComparison.OrdinalIgnoreCase)
-            || body.Contains("vision", StringComparison.OrdinalIgnoreCase)
-            || body.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
+        ChatError envelope = TryParseErrorEnvelope(body);
+        return ImageRejectionPattern.IsMatch(envelope == null ? body : $"{envelope.Message}\n{envelope.Type}\n{envelope.Code}");
     }
 
-    /// <summary>Caps raw backend text for safe inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>
+    /// <summary>Parses the body as an OpenAI-style error envelope (`{"error":{...}}`), returning the inner error object when present, else null.</summary>
+    internal static ChatError TryParseErrorEnvelope(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<ChatErrorResponse>(body, WireOptions)?.Error;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Caps raw backend text for inclusion in user-facing detail (default 600 chars, marked when truncated).</summary>
     public static string Excerpt(string text, int max = 600)
     {
         if (string.IsNullOrEmpty(text))

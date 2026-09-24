@@ -1,290 +1,283 @@
 /**
- * Settings persistence and model-discovery UI for the PromptEnhance extension.
+ * Settings for the PromptEnhance extension: the Get/Save/Reset settings round-trips, the
+ * `/v1/models`-backed model list, and the settings modal.
  *
- * Owns the settings panel, the Get/Save/Reset settings round-trips, and the
- * `/v1/models`-backed model dropdown. All wire data is normalized through the
- * contracts.ts adapters; no raw response object escapes this file's callbacks.
- *
- * AUTHORITATIVE SOURCE: Frontend/settings.ts. The committed Assets/settings.js
- * is tsc build output — do not hand-edit it.
+ * AUTHORITATIVE SOURCE: Frontend/settings.ts. The committed Assets/settings.js is tsc build
+ * output — do not hand-edit it.
  */
 
-window.PromptEnhance = window.PromptEnhance || {};
+/** Display labels for the replace modes, in PE_REPLACE_MODES order. */
+let PE_MODE_LABELS: Record<PEReplaceMode, string> = {
+    preview: 'Preview (Apply / Cancel)',
+    append: 'Append (keep original)',
+    replace_with_restore: 'Replace (with Restore button)'
+};
 
-/** Writes the panel status line. `kind` is '' | 'ok' | 'error' (CSS class). */
-function peSetStatus(message: string, kind: string): void {
-    const el = document.getElementById('pe_settings_status');
-    if (!el) {
-        return;
+/** Server-backed extension settings and the modal that edits them. */
+class PromptEnhanceSettings {
+    /** Settings as last loaded or saved from the server; `effective()` layers them over PE_DEFAULT_SETTINGS. */
+    loaded: Partial<PESettings> = {};
+
+    /** The settings modal, built on first open. */
+    modal: HTMLElement | null = null;
+
+    /** The full settings view: server-loaded values over defaults. */
+    effective(): PESettings {
+        return Object.assign({}, PE_DEFAULT_SETTINGS, this.loaded);
     }
-    el.textContent = message || '';
-    el.className = 'pe-settings-status' + (kind ? ' ' + kind : '');
-}
 
-/**
- * Loads settings from the server into PromptEnhance.settings.
- * Failure is surfaced to the console and the client keeps its defaults —
- * a broken settings store degrades to defaults visibly, never to a crash
- * that would take the Enhance button with it.
- */
-function peLoadSettings(): Promise<void> {
-    return new Promise((resolve) => {
-        genericRequest('GetPromptEnhanceSettings', {}, (data) => {
-            const result = peAdaptSettingsResult(data);
-            if (result.ok) {
-                PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
-            } else {
-                console.error('[PromptEnhance] Failed to load settings:', result.error);
-            }
-            resolve();
-        }, 0, (err) => {
-            console.error('[PromptEnhance] Failed to load settings:', peErrorText(err));
-            resolve();
-        });
-    });
-}
-
-/**
- * DOM adapter: reads the panel fields into a full PESettings value.
- * Missing or non-numeric fields fall back to the current effective settings,
- * and numeric bounds mirror the server-side ValidateSettings floors so the
- * panel cannot even submit a value the server would reject as non-positive.
- */
-function peReadPanelValues(): PESettings {
-    const current = peEffectiveSettings();
-    const num = (id: string, fallback: number): number => {
-        const el = document.getElementById(id) as HTMLInputElement | null;
-        const v = parseFloat(el?.value ?? '');
-        return Number.isFinite(v) ? v : fallback;
-    };
-    const text = (id: string, fallback: string): string => {
-        const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
-        return el ? el.value : fallback;
-    };
-    const rawMode = text('pe_replace_mode', current.replaceMode);
-    const replaceMode: PEReplaceMode = rawMode === 'append' || rawMode === 'replace_with_restore' ? rawMode : 'preview';
-    const sendImage = document.getElementById('pe_send_image') as HTMLInputElement | null;
-    return {
-        baseUrl: text('pe_base_url', current.baseUrl).trim(),
-        model: text('pe_model_select', current.model),
-        timeoutSeconds: Math.max(1, Math.round(num('pe_timeout', current.timeoutSeconds))),
-        systemPrompt: text('pe_system_prompt', current.systemPrompt),
-        temperature: num('pe_temperature', current.temperature),
-        maxTokens: Math.max(1, Math.round(num('pe_max_tokens', current.maxTokens))),
-        sendSelectedImage: sendImage ? sendImage.checked : current.sendSelectedImage,
-        replaceMode: replaceMode
-    };
-}
-
-/** Persists the panel values through SavePromptEnhanceSettings. Resolves whether the save was accepted. */
-function peSaveSettings(): Promise<boolean> {
-    const values = peReadPanelValues();
-    peSetStatus('Saving…', '');
-    return new Promise((resolve) => {
-        genericRequest('SavePromptEnhanceSettings', { settings: values }, (data) => {
-            const result = peAdaptSettingsResult(data);
-            if (result.ok) {
-                PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
-                peSetStatus('Saved.', 'ok');
-                resolve(true);
-            } else {
-                peSetStatus('Save failed: ' + result.error, 'error');
-                resolve(false);
-            }
-        }, 0, (err) => {
-            peSetStatus('Save failed: ' + peErrorText(err), 'error');
-            resolve(false);
-        });
-    });
-}
-
-/** Resets server-side settings to defaults, then repopulates the panel and refreshes the model list. */
-function peResetSettings(): Promise<boolean> {
-    peSetStatus('Resetting…', '');
-    return new Promise((resolve) => {
-        genericRequest('ResetPromptEnhanceSettings', {}, (data) => {
-            const result = peAdaptSettingsResult(data);
-            if (result.ok) {
-                PromptEnhance.settings = Object.assign({}, PromptEnhance.settings, result.settings);
-                pePopulatePanel();
-                peSetStatus('Reset to defaults.', 'ok');
-                peFetchModels();
-                resolve(true);
-            } else {
-                peSetStatus('Reset failed: ' + result.error, 'error');
-                resolve(false);
-            }
-        }, 0, (err) => {
-            peSetStatus('Reset failed: ' + peErrorText(err), 'error');
-            resolve(false);
-        });
-    });
-}
-
-/**
- * Populates the model dropdown from the backend's `/v1/models` discovery
- * route. Every failure mode (unreachable, HTTP error, empty list, transport
- * error) lands as a visible disabled option plus a status-line message —
- * never an empty dropdown with no explanation.
- */
-function peFetchModels(): Promise<void> {
-    const select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
-    if (!select) {
-        return Promise.resolve();
+    /** Merges a server settings payload into `loaded`. */
+    apply(settings: Partial<PESettings>): void {
+        this.loaded = Object.assign({}, this.loaded, settings);
     }
-    select.innerHTML = '';
-    select.add(new Option('Loading models…', ''));
-    peSetStatus('Fetching models…', '');
-    return new Promise((resolve) => {
-        genericRequest('PromptEnhanceListModels', {}, (data) => {
-            const result = peAdaptModelsResult(data);
-            select.innerHTML = '';
-            if (result.ok) {
-                select.add(new Option('-- Select a model --', ''));
-                for (const model of result.models) {
-                    select.add(new Option(model.name, model.id));
+
+    /** Loads settings from the server. On failure the defaults stay in effect and the failure is logged. */
+    load(): Promise<void> {
+        return new Promise((resolve) => {
+            genericRequest(PE_ROUTES.getSettings, {}, (data) => {
+                let result = peAdaptSettingsResult(data);
+                if (result.ok) {
+                    this.apply(result.settings);
+                    if (peIsRecord(data) && data.recovered === true) {
+                        console.warn('[PromptEnhance] Stored settings were corrupt; defaults were applied and the corrupt data was backed up server-side (generic-data subkey config_corrupt_backup).');
+                    }
                 }
-                const configured = PromptEnhance.settings?.model;
-                if (configured) {
-                    select.value = configured;
+                else {
+                    console.error('[PromptEnhance] Failed to load settings:', result.error);
                 }
-                peSetStatus('', '');
-            } else {
-                const opt = new Option('No models — check Base URL', '');
-                opt.disabled = true;
-                select.add(opt);
-                peSetStatus(result.error, 'error');
-            }
-            resolve();
-        }, 0, (err) => {
-            select.innerHTML = '';
-            const opt = new Option('Error loading models', '');
-            opt.disabled = true;
-            select.add(opt);
-            peSetStatus(peErrorText(err), 'error');
-            resolve();
+                resolve();
+            }, 0, (err) => {
+                console.error('[PromptEnhance] Failed to load settings:', peErrorText(err));
+                resolve();
+            });
         });
-    });
-}
-
-/** DOM adapter: writes the current effective settings into the panel fields. */
-function pePopulatePanel(): void {
-    const current = peEffectiveSettings();
-    const set = (id: string, value: string | number): void => {
-        const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
-        if (el) {
-            el.value = String(value);
-        }
-    };
-    set('pe_base_url', current.baseUrl);
-    set('pe_timeout', current.timeoutSeconds);
-    set('pe_system_prompt', current.systemPrompt);
-    set('pe_temperature', current.temperature);
-    set('pe_max_tokens', current.maxTokens);
-    set('pe_replace_mode', current.replaceMode);
-    const sendImage = document.getElementById('pe_send_image') as HTMLInputElement | null;
-    if (sendImage) {
-        sendImage.checked = !!current.sendSelectedImage;
     }
-    const model = document.getElementById('pe_model_select') as HTMLSelectElement | null;
-    if (model && current.model && [...model.options].some(o => o.value === current.model)) {
-        model.value = current.model;
-    }
-}
 
-/** Builds (once) and returns the settings panel, mounted on document.body. */
-function peBuildSettingsPanel(): HTMLElement {
-    let panel = document.getElementById('pe_settings_panel');
-    if (panel) {
-        return panel;
-    }
-    panel = document.createElement('div');
-    panel.id = 'pe_settings_panel';
-    panel.className = 'pe-settings-panel';
-    panel.style.display = 'none';
-    panel.innerHTML = `
-        <div class="pe-settings-header">
-            <span>PromptEnhance Settings</span>
-            <button type="button" class="pe-settings-close" id="pe_settings_close" title="Close">×</button>
-        </div>
-        <div class="pe-settings-body">
-            <label for="pe_base_url">Base URL</label>
-            <input type="text" id="pe_base_url" placeholder="http://localhost:11434">
-            <div class="pe-field-hint">OpenAI-compatible server. A root URL or one ending in /v1 both work.</div>
-
-            <label for="pe_model_select">Model
-                <button type="button" class="pe-inline-btn" id="pe_refresh_models" title="Refresh models">⟳</button>
-            </label>
-            <select id="pe_model_select"><option value="">Loading models…</option></select>
-
-            <label for="pe_system_prompt">System Prompt</label>
-            <textarea id="pe_system_prompt" rows="4"></textarea>
-
-            <div class="pe-field-row">
-                <div class="pe-field-col">
-                    <label for="pe_temperature">Temperature</label>
-                    <input type="number" id="pe_temperature" min="0" max="2" step="0.05">
-                </div>
-                <div class="pe-field-col">
-                    <label for="pe_max_tokens">Max Tokens</label>
-                    <input type="number" id="pe_max_tokens" min="1" step="1">
-                </div>
-                <div class="pe-field-col">
-                    <label for="pe_timeout">Timeout (s)</label>
-                    <input type="number" id="pe_timeout" min="1" step="1">
-                </div>
-            </div>
-
-            <label for="pe_replace_mode">Apply Mode</label>
-            <select id="pe_replace_mode">
-                <option value="preview">Preview (Apply / Cancel)</option>
-                <option value="append">Append (keep original)</option>
-                <option value="replace_with_restore">Replace (with Restore button)</option>
-            </select>
-
-            <label class="pe-checkbox-label">
-                <input type="checkbox" id="pe_send_image"> Send selected image with enhance (needs a vision model)
-            </label>
-
-            <div class="pe-settings-status" id="pe_settings_status"></div>
-        </div>
-        <div class="pe-settings-footer">
-            <button type="button" class="pe-reset-btn" id="pe_reset_btn">Reset</button>
-            <button type="button" class="pe-save-btn" id="pe_save_btn">Save</button>
-        </div>
-    `;
-    document.body.appendChild(panel);
-
-    panel.querySelector<HTMLButtonElement>('#pe_settings_close')!.addEventListener('click', peCloseSettingsPanel);
-    panel.querySelector<HTMLButtonElement>('#pe_save_btn')!.addEventListener('click', () => { peSaveSettings(); });
-    panel.querySelector<HTMLButtonElement>('#pe_reset_btn')!.addEventListener('click', () => { peResetSettings(); });
-    panel.querySelector<HTMLButtonElement>('#pe_refresh_models')!.addEventListener('click', (e) => { e.preventDefault(); peFetchModels(); });
-    document.addEventListener('click', (e) => {
-        if (panel!.style.display !== 'block') {
+    /** Writes the modal status line; `kind` picks SwarmUI's success or error styling. */
+    setStatus(message: string, kind: '' | 'ok' | 'error'): void {
+        let status = document.getElementById('pe_settings_status');
+        if (!status) {
             return;
         }
-        const trigger = document.getElementById('pe_settings_button');
-        if (!panel!.contains(e.target as Node | null) && trigger && !trigger.contains(e.target as Node | null)) {
-            peCloseSettingsPanel();
+        status.textContent = message;
+        status.classList.toggle('modal_success_bottom', kind == 'ok');
+        status.classList.toggle('modal_error_bottom', kind == 'error');
+    }
+
+    /** Reads the modal fields into a complete, in-bounds settings value. */
+    readForm(): PESettings {
+        let value = (id: string): string => (getRequiredElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+        return peNormalizeSettings({
+            baseUrl: value('pe_base_url'),
+            model: value('pe_model_select'),
+            timeoutSeconds: value('pe_timeout'),
+            systemPrompt: value('pe_system_prompt'),
+            temperature: value('pe_temperature'),
+            maxTokens: value('pe_max_tokens'),
+            sendSelectedImage: (getRequiredElementById('pe_send_image') as HTMLInputElement).checked,
+            replaceMode: value('pe_replace_mode')
+        }, this.effective());
+    }
+
+    /** Writes the effective settings into the modal fields. */
+    populateForm(): void {
+        let current = this.effective();
+        let set = (id: string, value: string | number): void => {
+            (getRequiredElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = `${value}`;
+        };
+        set('pe_base_url', current.baseUrl);
+        set('pe_timeout', current.timeoutSeconds);
+        set('pe_system_prompt', current.systemPrompt);
+        set('pe_temperature', current.temperature);
+        set('pe_max_tokens', current.maxTokens);
+        set('pe_replace_mode', current.replaceMode);
+        (getRequiredElementById('pe_send_image') as HTMLInputElement).checked = current.sendSelectedImage;
+        let model = getRequiredElementById('pe_model_select') as HTMLSelectElement;
+        if (current.model && [...model.options].some((option) => option.value == current.model)) {
+            model.value = current.model;
         }
-    });
-    return panel;
-}
+    }
 
-function peOpenSettingsPanel(): void {
-    const panel = peBuildSettingsPanel();
-    pePopulatePanel();
-    peSetStatus('', '');
-    panel.style.display = 'block';
-}
+    /** Persists the modal values through SavePromptEnhanceSettings. Resolves whether the save was accepted. */
+    save(): Promise<boolean> {
+        let values = this.readForm();
+        this.setStatus('Saving…', '');
+        return new Promise((resolve) => {
+            genericRequest(PE_ROUTES.saveSettings, { settings: values }, (data) => {
+                let result = peAdaptSettingsResult(data);
+                if (result.ok) {
+                    this.apply(result.settings);
+                    this.setStatus('Saved.', 'ok');
+                    resolve(true);
+                }
+                else {
+                    this.setStatus(`Save failed: ${result.error}`, 'error');
+                    resolve(false);
+                }
+            }, 0, (err) => {
+                this.setStatus(`Save failed: ${peErrorText(err)}`, 'error');
+                resolve(false);
+            });
+        });
+    }
 
-function peCloseSettingsPanel(): void {
-    const panel = document.getElementById('pe_settings_panel');
-    if (panel) {
-        panel.style.display = 'none';
+    /** Resets server-side settings to defaults, then repopulates the modal and refreshes the model list. */
+    reset(): Promise<boolean> {
+        this.setStatus('Resetting…', '');
+        return new Promise((resolve) => {
+            genericRequest(PE_ROUTES.resetSettings, {}, (data) => {
+                let result = peAdaptSettingsResult(data);
+                if (result.ok) {
+                    this.loaded = result.settings;
+                    this.populateForm();
+                    this.setStatus('Reset to defaults.', 'ok');
+                    this.fetchModels();
+                    resolve(true);
+                }
+                else {
+                    this.setStatus(`Reset failed: ${result.error}`, 'error');
+                    resolve(false);
+                }
+            }, 0, (err) => {
+                this.setStatus(`Reset failed: ${peErrorText(err)}`, 'error');
+                resolve(false);
+            });
+        });
+    }
+
+    /** Replaces the model dropdown's options with one disabled explanatory entry. */
+    showModelPlaceholder(select: HTMLSelectElement, text: string): void {
+        select.innerHTML = '';
+        let option = new Option(text, '');
+        option.disabled = true;
+        select.add(option);
+    }
+
+    /** Fills the model dropdown from the backend's `/v1/models` route. Every failure lands as a disabled explanatory option plus a status message. */
+    fetchModels(): Promise<void> {
+        let select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
+        if (!select) {
+            return Promise.resolve();
+        }
+        this.showModelPlaceholder(select, 'Loading models…');
+        this.setStatus('Fetching models…', '');
+        return new Promise((resolve) => {
+            genericRequest(PE_ROUTES.listModels, {}, (data) => {
+                let result = peAdaptModelsResult(data);
+                if (result.ok) {
+                    select.innerHTML = '';
+                    select.add(new Option('-- Select a model --', ''));
+                    for (let model of result.models) {
+                        select.add(new Option(model.name, model.id));
+                    }
+                    let configured = this.effective().model;
+                    if (configured) {
+                        select.value = configured;
+                    }
+                    this.setStatus('', '');
+                }
+                else {
+                    this.showModelPlaceholder(select, 'No models — check Base URL');
+                    this.setStatus(result.error, 'error');
+                }
+                resolve();
+            }, 0, (err) => {
+                this.showModelPlaceholder(select, 'Error loading models');
+                this.setStatus(peErrorText(err), 'error');
+                resolve();
+            });
+        });
+    }
+
+    /** Builds the settings modal from SwarmUI's modal and input helpers (site.js) and appends it to the page. */
+    buildModal(): HTMLElement {
+        let defaults = PE_DEFAULT_SETTINGS;
+        let field = (id: string, name: string, type: string, description: string, input: string): string =>
+            makeGenericPopover(id, name, type, description, '') + input;
+        let body = field('pe_base_url', 'Base URL', 'text', 'OpenAI-compatible server. A root URL or one ending in /v1 both work. If the server needs an API key, set it under User → API Keys.',
+                makeTextInput(null, 'pe_base_url', '', 'Base URL', '', defaults.baseUrl, 'normal', defaults.baseUrl, false, false, true))
+            + '<div class="pe-api-key-row">API Key: <span id="pe_api_key_status"></span> <a href="#" id="pe_api_key_link">Set in User → API Keys</a></div>'
+            + field('pe_model_select', 'Model', 'dropdown', 'The model the backend runs. The list comes from the backend at Base URL.',
+                makeDropdownInput(null, 'pe_model_select', '', 'Model', '', [], '', false, true))
+            + '<button type="button" class="basic-button" id="pe_refresh_models">Refresh Models</button>'
+            + field('pe_system_prompt', 'System Prompt', 'text', 'Instruction sent ahead of the prompt to enhance.',
+                makeTextInput(null, 'pe_system_prompt', '', 'System Prompt', '', defaults.systemPrompt, 'big', '', false, false, true))
+            + field('pe_temperature', 'Temperature', 'number', `Sampling temperature, ${PE_LIMITS.temperature.min} to ${PE_LIMITS.temperature.max}.`,
+                makeNumberInput(null, 'pe_temperature', '', 'Temperature', '', defaults.temperature, PE_LIMITS.temperature.min, PE_LIMITS.temperature.max, 0.05))
+            + field('pe_max_tokens', 'Max Tokens', 'number', 'Upper bound on the length of the enhanced prompt.',
+                makeNumberInput(null, 'pe_max_tokens', '', 'Max Tokens', '', defaults.maxTokens, PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max, 1))
+            + field('pe_timeout', 'Timeout (s)', 'number', `Seconds to wait for the backend, ${PE_LIMITS.timeoutSeconds.min} to ${PE_LIMITS.timeoutSeconds.max}.`,
+                makeNumberInput(null, 'pe_timeout', '', 'Timeout (s)', '', defaults.timeoutSeconds, PE_LIMITS.timeoutSeconds.min, PE_LIMITS.timeoutSeconds.max, 1))
+            + field('pe_replace_mode', 'Apply Mode', 'dropdown', 'What Enhance does with the result: show it for Apply/Cancel, append it below the prompt, or replace the prompt with a Restore button.',
+                makeDropdownInput(null, 'pe_replace_mode', '', 'Apply Mode', '', [...PE_REPLACE_MODES], defaults.replaceMode, false, true, PE_REPLACE_MODES.map((mode) => PE_MODE_LABELS[mode])))
+            + field('pe_send_image', 'Send Selected Image', 'checkbox', 'Attach the currently selected image to the request. Needs a vision model.',
+                makeCheckboxInput(null, 'pe_send_image', '', 'Send Selected Image', '', defaults.sendSelectedImage, false, false, true));
+        document.body.insertAdjacentHTML('beforeend', modalHeader('pe_settings_modal', 'PromptEnhance Settings')
+            + `<div class="modal-body">${body}</div>`
+            + '<div class="modal-footer">'
+            + '<span id="pe_settings_status"></span>'
+            + '<button type="button" class="btn btn-secondary basic-button" id="pe_reset_btn">Reset</button>'
+            + '<button type="button" class="btn btn-secondary basic-button" id="pe_close_btn">Close</button>'
+            + '<button type="button" class="btn btn-primary basic-button" id="pe_save_btn">Save</button>'
+            + '</div>'
+            + modalFooter());
+        let modal = getRequiredElementById('pe_settings_modal');
+        getRequiredElementById('pe_refresh_models').addEventListener('click', () => this.fetchModels());
+        getRequiredElementById('pe_api_key_link').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.openApiKeys();
+        });
+        getRequiredElementById('pe_reset_btn').addEventListener('click', () => this.reset());
+        getRequiredElementById('pe_close_btn').addEventListener('click', () => this.close());
+        getRequiredElementById('pe_save_btn').addEventListener('click', () => this.save());
+        return modal;
+    }
+
+    /** Shows whether a backend API key is saved, from SwarmUI's GetAPIKeyStatus route. The key itself never reaches the browser. */
+    fetchApiKeyStatus(): void {
+        let status = document.getElementById('pe_api_key_status');
+        if (!status) {
+            return;
+        }
+        status.textContent = '…';
+        genericRequest('GetAPIKeyStatus', { keyType: PE_API_KEY_TYPE }, (data) => {
+            status.textContent = peIsRecord(data) && typeof data.status == 'string' ? data.status : 'unknown';
+        }, 0, (err) => {
+            status.textContent = `unknown (${peErrorText(err)})`;
+        });
+    }
+
+    /** Closes the modal and shows this extension's row in SwarmUI's User → API Keys table. */
+    openApiKeys(): void {
+        this.close();
+        getRequiredElementById('usersettingstabbutton').click();
+        getRequiredElementById('userinfotabbutton').click();
+        let input = document.getElementById('promptenhance_api_key');
+        if (input) {
+            input.scrollIntoView({ block: 'center' });
+            input.focus();
+        }
+    }
+
+    /** Opens the settings modal with the current settings, a fresh model list, and the API key status. */
+    open(): void {
+        if (!this.modal) {
+            this.modal = this.buildModal();
+        }
+        this.populateForm();
+        this.setStatus('', '');
+        this.fetchModels();
+        this.fetchApiKeyStatus();
+        $(this.modal).modal('show');
+    }
+
+    /** Closes the settings modal. */
+    close(): void {
+        if (this.modal) {
+            $(this.modal).modal('hide');
+        }
     }
 }
 
-window.PromptEnhance.loadSettings = peLoadSettings;
-window.PromptEnhance.fetchModels = peFetchModels;
-window.PromptEnhance.openSettingsPanel = peOpenSettingsPanel;
+/** Shared extension settings. */
+let promptEnhanceSettings = new PromptEnhanceSettings();

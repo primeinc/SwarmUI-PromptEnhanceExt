@@ -1,27 +1,22 @@
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Utils;
+using SwarmUI.WebAPI;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// Settings persistence: the single server-side source of truth for the
-/// eight-key settings schema, stored per-user through SwarmUI's own generic
-/// user-data store (User.GetGenericData/SaveGenericData). Reads merge stored
-/// values over <see cref="Defaults"/> key-by-key, so unknown or missing keys
-/// can never corrupt the effective settings.
-/// </summary>
+/// <summary>Settings persistence for the eight-key settings schema, stored per-user through User.GetGenericData/SaveGenericData. Reads merge stored values over <see cref="Defaults"/> key-by-key.</summary>
+[API.APIClass("PromptEnhance extension: the per-user settings (backend Base URL, model, prompt, sampling, and apply mode).")]
 public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
     private const string SETTINGS_SUBKEY = "config";
+    private const string CORRUPT_BACKUP_SUBKEY = "config_corrupt_backup";
 
-    /// <summary>
-    /// The canonical defaults. Frontend/contracts.ts mirrors these verbatim
-    /// (SettingsDefaultsParityTests pins the systemPrompt text); a fresh
-    /// profile works against a local Ollama with zero configuration except
-    /// picking a model.
-    /// </summary>
+    /// <summary>Request timeout ceiling in seconds. Frontend/settings.ts mirrors this bound.</summary>
+    public const int MaxTimeoutSeconds = 3600;
+
+    /// <summary>The defaults, mirroring contracts/pe-contract.json.</summary>
     public static JObject Defaults => new()
     {
         ["baseUrl"] = "http://localhost:11434",
@@ -39,16 +34,71 @@ public class SessionSettings
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
     ];
 
+    /// <summary>Parses the stored settings blob, treating unparseable data as absent.</summary>
+    private static JObject TryParseStored(string stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return null;
+        }
+        try
+        {
+            return JObject.Parse(stored);
+        }
+        catch (Newtonsoft.Json.JsonException ex)
+        {
+            Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save; the corrupt data is kept under the '{CORRUPT_BACKUP_SUBKEY}' subkey): {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Reads and parses the stored settings. Unparseable data is backed up once under <see cref="CORRUPT_BACKUP_SUBKEY"/> and <paramref name="recovered"/> is set.</summary>
+    private static JObject ReadStored(Session session, out bool recovered)
+    {
+        string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+        JObject storedObj = TryParseStored(stored);
+        recovered = storedObj == null && !string.IsNullOrWhiteSpace(stored);
+        if (recovered)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(session.User.GetGenericData(SETTINGS_KEY, CORRUPT_BACKUP_SUBKEY)))
+                {
+                    session.User.SaveGenericData(SETTINGS_KEY, CORRUPT_BACKUP_SUBKEY, stored);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"[PromptEnhance] Could not back up the corrupt settings blob: {ex.Message}");
+            }
+        }
+        return storedObj;
+    }
+
     /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
+    [API.APIDescription("Returns the current user's PromptEnhance settings: stored values merged over the defaults. The backend API key is not part of the settings and is never returned.",
+        """
+            "success": true,
+            "settings": {
+                "baseUrl": "http://localhost:11434",
+                "model": "",
+                "timeoutSeconds": 60,
+                "systemPrompt": "You are a prompt enhancer ...",
+                "temperature": 0.7,
+                "maxTokens": 1024,
+                "sendSelectedImage": false,
+                "replaceMode": "preview" // or "append", "replace_with_restore"
+            },
+            "recovered": true // only when the stored settings were corrupt and defaults were applied
+        """)]
     public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
         {
             JObject settings = Defaults;
-            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
-            if (!string.IsNullOrWhiteSpace(stored))
+            JObject storedObj = ReadStored(session, out bool recovered);
+            if (storedObj != null)
             {
-                JObject storedObj = JObject.Parse(stored);
                 foreach (string key in KnownKeys)
                 {
                     if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
@@ -57,7 +107,12 @@ public class SessionSettings
                     }
                 }
             }
-            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
+            JObject response = PromptEnhanceAPI.CreateSettingsResponse(settings);
+            if (recovered)
+            {
+                response["recovered"] = true;
+            }
+            return Task.FromResult(response);
         }
         catch (Exception ex)
         {
@@ -66,17 +121,20 @@ public class SessionSettings
         }
     }
 
-    /// <summary>
-    /// API route: validates then persists a partial settings object. The merge
-    /// order is defaults ← previously stored ← incoming, per known key, so a
-    /// partial save never erases unrelated settings and unknown keys are
-    /// dropped at the boundary.
-    /// </summary>
-    public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
+    /// <summary>API route: validates then persists a partial settings object. Merge order is defaults ← previously stored ← incoming, per known key; unknown keys are dropped.</summary>
+    [API.APIDescription("Validates and saves a partial PromptEnhance settings object for the current user. Keys left out keep their stored value; unknown keys are ignored. Nothing is saved if any key is invalid.",
+        """
+            "success": true,
+            "settings": { ... } // the full saved settings, as GetPromptEnhanceSettings returns them
+            // on failure: "success": false, "error": "Base URL must be a valid http(s) URL ...", "error_id": "generic"
+        """)]
+    public static Task<JObject> SavePromptEnhanceSettings(
+        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl (absolute http(s) URL; a trailing /v1 is accepted), model (string, empty for none), timeoutSeconds (integer 1-3600), systemPrompt (string), temperature (number 0-2), maxTokens (integer >= 1), sendSelectedImage (boolean), replaceMode ('preview', 'append', or 'replace_with_restore').")] JObject raw,
+        Session session)
     {
         try
         {
-            JObject incoming = rawInput?["settings"] as JObject;
+            JObject incoming = raw?["settings"] as JObject;
             if (incoming == null)
             {
                 return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No settings object provided."));
@@ -87,10 +145,9 @@ public class SessionSettings
                 return Task.FromResult(validationError);
             }
             JObject merged = Defaults;
-            string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
-            if (!string.IsNullOrWhiteSpace(stored))
+            JObject storedObj = ReadStored(session, out bool recovered);
+            if (storedObj != null)
             {
-                JObject storedObj = JObject.Parse(stored);
                 foreach (string key in KnownKeys)
                 {
                     if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
@@ -106,8 +163,17 @@ public class SessionSettings
                     merged[key] = incoming[key];
                 }
             }
-            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, merged.ToString());
-            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(merged));
+            JObject persistError = PersistVerified(session, merged.ToString());
+            if (persistError != null)
+            {
+                return Task.FromResult(persistError);
+            }
+            JObject response = PromptEnhanceAPI.CreateSettingsResponse(merged);
+            if (recovered)
+            {
+                response["recovered"] = true;
+            }
+            return Task.FromResult(response);
         }
         catch (Exception ex)
         {
@@ -116,12 +182,7 @@ public class SessionSettings
         }
     }
 
-    /// <summary>
-    /// Schema validation for an incoming partial settings object. Integer
-    /// fields are bounded to [1, int.MaxValue] as long values — an over-range
-    /// stored value would otherwise overflow later Value&lt;int?&gt; reads into an
-    /// unclassified 500. Returns null when valid, else a classified error response.
-    /// </summary>
+    /// <summary>Schema validation for an incoming partial settings object, covering every key in <see cref="KnownKeys"/>. Returns null when valid, else a classified error response.</summary>
     public static JObject ValidateSettings(JObject incoming)
     {
         JToken baseUrl = incoming["baseUrl"];
@@ -131,13 +192,33 @@ public class SessionSettings
             {
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a non-empty string.");
             }
+            if (BackendClient.NormalizeBaseUrl(baseUrl.Value<string>()) == null)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a valid http(s) URL with no query, fragment, or user name and password (for example http://localhost:11434).");
+            }
+        }
+        JToken model = incoming["model"];
+        if (model != null && model.Type != JTokenType.Null)
+        {
+            if (model.Type != JTokenType.String)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Model must be a string (an empty string means no model is selected).");
+            }
         }
         JToken timeoutSeconds = incoming["timeoutSeconds"];
         if (timeoutSeconds != null && timeoutSeconds.Type != JTokenType.Null)
         {
-            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1 || timeoutSeconds.Value<long>() > int.MaxValue)
+            if (timeoutSeconds.Type != JTokenType.Integer || timeoutSeconds.Value<long>() < 1 || timeoutSeconds.Value<long>() > MaxTimeoutSeconds)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Timeout (seconds) must be a whole number between 1 and {int.MaxValue}.");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"Timeout (seconds) must be a whole number between 1 and {MaxTimeoutSeconds}.");
+            }
+        }
+        JToken systemPrompt = incoming["systemPrompt"];
+        if (systemPrompt != null && systemPrompt.Type != JTokenType.Null)
+        {
+            if (systemPrompt.Type != JTokenType.String)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "System prompt must be a string.");
             }
         }
         JToken maxTokens = incoming["maxTokens"];
@@ -161,6 +242,14 @@ public class SessionSettings
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Temperature must be a number between 0 and 2.");
             }
         }
+        JToken sendSelectedImage = incoming["sendSelectedImage"];
+        if (sendSelectedImage != null && sendSelectedImage.Type != JTokenType.Null)
+        {
+            if (sendSelectedImage.Type != JTokenType.Boolean)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send selected image must be a boolean (true or false).");
+            }
+        }
         JToken replaceMode = incoming["replaceMode"];
         if (replaceMode != null && replaceMode.Type != JTokenType.Null)
         {
@@ -173,13 +262,55 @@ public class SessionSettings
         return null;
     }
 
+    /// <summary>Writes the serialized settings through User.SaveGenericData and reads them back. Returns null on verified persistence, else a classified error response.</summary>
+    private static JObject PersistVerified(Session session, string serialized)
+    {
+        session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, serialized);
+        string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
+        if (!PersistedMatches(stored, serialized))
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "The server did not persist the settings (persistence is disabled or this account cannot save data).");
+        }
+        return null;
+    }
+
+    /// <summary>True when <paramref name="stored"/> represents the same settings that were just written: ordinal compare, then semantic JSON compare. A null read or unparseable data is treated as not persisted.</summary>
+    private static bool PersistedMatches(string stored, string serialized)
+    {
+        if (stored == null)
+        {
+            return false;
+        }
+        if (string.Equals(stored, serialized, System.StringComparison.Ordinal))
+        {
+            return true;
+        }
+        try
+        {
+            return JToken.DeepEquals(JToken.Parse(stored), JToken.Parse(serialized));
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/> and returns them.</summary>
+    [API.APIDescription("Resets the current user's PromptEnhance settings to the defaults. The backend API key is separate and is not touched.",
+        """
+            "success": true,
+            "settings": { ... } // the defaults, as GetPromptEnhanceSettings returns them
+        """)]
     public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try
         {
             JObject settings = Defaults;
-            session.User.SaveGenericData(SETTINGS_KEY, SETTINGS_SUBKEY, settings.ToString());
+            JObject persistError = PersistVerified(session, settings.ToString());
+            if (persistError != null)
+            {
+                return Task.FromResult(persistError);
+            }
             return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)

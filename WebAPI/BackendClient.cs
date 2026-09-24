@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Backends;
@@ -11,41 +12,48 @@ using PromptEnhance.WebAPI.Models;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>
-/// Backend transport: owns the two OpenAI-compatible seams
-/// (`GET /v1/models`, `POST /v1/chat/completions`) plus the reachability
-/// probe in front of them. Every failure leaves this class as a classified
-/// <see cref="PromptEnhanceErrorCategory"/> response — no exception escapes
-/// to SwarmUI's generic 500 handler.
-/// </summary>
+/// <summary>Backend transport for `GET /v1/models` and `POST /v1/chat/completions`, plus the reachability probe. Every failure returns a classified <see cref="PromptEnhanceErrorCategory"/> response.</summary>
+[API.APIClass("PromptEnhance extension: calls to the user's configured OpenAI-compatible backend (model list and prompt enhancement).")]
 public class BackendClient
 {
-    /// <summary>
-    /// Shared client from SwarmUI's own factory, with the per-client timeout
-    /// disabled: timeouts are enforced per-request via CancellationTokenSource
-    /// so the user's timeoutSeconds setting applies per call, not per client.
-    /// </summary>
+    /// <summary>The one client for every backend call; see <see cref="CreateHttpClient"/>.</summary>
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
+    /// <summary>SwarmUI's <see cref="NetworkBackendUtils.MakeHttpClient"/> configuration with automatic redirects off, so a request never leaves the configured Base URL. Per-request timeouts come from settings.</summary>
     private static HttpClient CreateHttpClient()
     {
-        HttpClient client = NetworkBackendUtils.MakeHttpClient();
+        HttpClient client = new(new SocketsHttpHandler() { PooledConnectionLifetime = TimeSpan.FromMinutes(10), MaxConnectionsPerServer = 1000, AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"SwarmUI/{Utilities.Version}");
         client.Timeout = Timeout.InfiniteTimeSpan;
         return client;
     }
 
-    private const int ReachabilityTimeoutSeconds = 3;
-    private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
-    private static readonly object ReachabilityLock = new();
-    private static readonly Dictionary<string, (bool reachable, DateTime whenUtc)> ReachabilityCache = new();
+    /// <summary>A classified error for a 3xx response, naming where the backend tried to send the request; null for any other status.</summary>
+    private static JObject RedirectError(HttpResponseMessage response)
+    {
+        int status = (int)response.StatusCode;
+        if (status < 300 || status > 399)
+        {
+            return null;
+        }
+        string target = response.Headers.Location?.ToString() ?? "(no Location header)";
+        return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.HttpError,
+            $"The backend answered {status} redirecting to {target}. PromptEnhance does not follow redirects: set the Base URL to the address the server redirects to.");
+    }
 
-    /// <summary>
-    /// Normalizes a user-entered base URL: trims, strips trailing slashes and
-    /// a trailing `/v1` (both root URLs and /v1 URLs are accepted in settings),
-    /// and requires an absolute http(s) URI. Returns null for anything else —
-    /// the caller classifies that as <see cref="PromptEnhanceErrorCategory.InvalidBaseUrl"/>.
-    /// </summary>
+    /// <summary>How long the reachability probe waits for any response before letting the real call proceed.</summary>
+    private const int ReachabilityTimeoutSeconds = 3;
+
+    /// <summary>How long a "reachable" probe result is reused.</summary>
+    private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long an "unreachable" probe result is reused.</summary>
+    private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
+
+    /// <summary>Probe results keyed by normalized Base URL.</summary>
+    private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
+
+    /// <summary>Normalizes a base URL: trims, strips trailing slashes and a trailing `/v1`, requires an absolute http(s) URI with no query, fragment, or user info (any of which would change the path or host the fixed `/v1/...` suffix reaches). Returns null otherwise.</summary>
     public static string NormalizeBaseUrl(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -53,12 +61,17 @@ public class BackendClient
             return null;
         }
         string trimmed = raw.Trim().TrimEnd('/');
+        if (trimmed.Contains('?') || trimmed.Contains('#'))
+        {
+            return null;
+        }
         if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
         {
             trimmed = trimmed[..^3].TrimEnd('/');
         }
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out Uri uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+            !string.IsNullOrEmpty(uri.UserInfo))
         {
             return null;
         }
@@ -69,70 +82,88 @@ public class BackendClient
 
     private static string ChatUrl(string normalizedBase) => $"{normalizedBase}/v1/chat/completions";
 
-    /// <summary>
-    /// Cheap 3-second reachability probe with a small TTL cache (10s on
-    /// success, 30s on failure) so an offline backend fails fast and
-    /// repeatedly clicking Enhance doesn't hammer a dead host. Any HTTP
-    /// response — even an error page — counts as reachable; only transport
-    /// failures and timeouts count as unreachable.
-    /// </summary>
+    /// <summary>Reachability probe against `GET /v1/models` with a TTL cache (10s reachable, 30s unreachable). Sends no API key: any HTTP response, a 401 included, counts as reachable; only transport failures count as unreachable; a probe timeout counts as reachable.</summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
-        lock (ReachabilityLock)
+        if (ReachabilityCache.TryGetValue(normalizedBase, out bool cached))
         {
-            if (ReachabilityCache.TryGetValue(normalizedBase, out (bool reachable, DateTime whenUtc) cached))
-            {
-                TimeSpan ttl = cached.reachable ? ReachabilityTtlSuccess : ReachabilityTtlFailure;
-                if (DateTime.UtcNow - cached.whenUtc < ttl)
-                {
-                    return cached.reachable;
-                }
-            }
+            return cached;
         }
         bool reachable;
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(ReachabilityTimeoutSeconds));
-            using HttpRequestMessage probe = new(HttpMethod.Get, normalizedBase);
-            await HttpClient.SendAsync(probe, cts.Token);
+            using HttpRequestMessage probe = new(HttpMethod.Get, ModelsUrl(normalizedBase));
+            using HttpResponseMessage response = await HttpClient.SendAsync(probe, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             reachable = true;
         }
-        catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException or HttpRequestException)
+        catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException)
+        {
+            Logs.Warning($"[PromptEnhance] Reachability probe for {normalizedBase} got no response within {ReachabilityTimeoutSeconds}s; proceeding and letting the request timeout decide.");
+            reachable = true;
+        }
+        catch (HttpRequestException ex)
         {
             Logs.Warning($"[PromptEnhance] Backend at {normalizedBase} not reachable: {ex.GetType().Name}");
             reachable = false;
         }
-        lock (ReachabilityLock)
-        {
-            ReachabilityCache[normalizedBase] = (reachable, DateTime.UtcNow);
-        }
+        ReachabilityCache.Set(normalizedBase, reachable, reachable ? ReachabilityTtlSuccess : ReachabilityTtlFailure);
         return reachable;
     }
 
-    /// <summary>Loads the session's settings and validates the base URL, funneling failures through <paramref name="setError"/> as classified responses.</summary>
-    private static async Task<(JObject settings, string normalizedBase)> ResolveConfig(Session session, Action<JObject> setError)
+    /// <summary>Per-request timeout from settings, clamped to [1, <see cref="SessionSettings.MaxTimeoutSeconds"/>].</summary>
+    private static int ResolveTimeoutSeconds(JObject settings)
+    {
+        JToken token = settings["timeoutSeconds"];
+        long raw = token != null && (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            ? token.Value<long>()
+            : 60L;
+        long clamped = Math.Clamp(raw, 1L, (long)SessionSettings.MaxTimeoutSeconds);
+        return (int)clamped;
+    }
+
+    /// <summary>The error for a saved API key that cannot be sent as a header value. Never includes the key.</summary>
+    private static JObject UnsendableKeyError() => PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Authentication,
+        "The saved PromptEnhance API key contains spaces, line breaks, or non-ASCII characters, so it cannot be sent. Re-enter it under User → API Keys.");
+
+    private static async Task<(JObject settings, string normalizedBase, string apiKey)> ResolveConfig(Session session, Action<JObject> setError)
     {
         JObject settingsResponse = await SessionSettings.GetPromptEnhanceSettings(session);
         if (settingsResponse["success"]?.Value<bool>() != true)
         {
             setError(settingsResponse);
-            return (null, null);
+            return (null, null, null);
         }
         JObject settings = settingsResponse["settings"] as JObject;
         string normalizedBase = NormalizeBaseUrl(settings?["baseUrl"]?.ToString());
         if (normalizedBase == null)
         {
             setError(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidBaseUrl));
-            return (null, null);
+            return (null, null, null);
         }
-        return (settings, normalizedBase);
+        string apiKey = UpstreamApiKey.ForUser(session);
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            setError(UnsendableKeyError());
+            return (null, null, null);
+        }
+        return (settings, normalizedBase, apiKey);
     }
 
-    /// <summary>API route: lists the backend's models for the settings dropdown. Registered by <see cref="PromptEnhanceAPI.Register"/>.</summary>
+    /// <summary>API route: lists the backend's models.</summary>
+    [API.APIDescription("Lists the models the configured backend offers, from its `GET /v1/models`. Sends the user's PromptEnhance API key, if set.",
+        """
+            "success": true,
+            "models": [
+                { "id": "llama3.2", "name": "llama3.2" }
+            ]
+            // on failure: "success": false, "error": "Cannot reach the LLM backend ...", "error_id": "server_unavailable"
+            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, invalid_response_shape, http_error, authentication, generic
+        """)]
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
-        (JObject settings, string normalizedBase) = await ResolveConfig(session, e => error = e);
+        (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
         {
             return error;
@@ -141,25 +172,28 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ServerUnavailable);
         }
-        int timeoutSec = settings["timeoutSeconds"]?.Value<int?>() ?? 60;
-        return await ExecuteListModels(normalizedBase, timeoutSec);
+        return await ExecuteListModels(normalizedBase, ResolveTimeoutSeconds(settings), apiKey);
     }
 
-    /// <summary>
-    /// The raw `GET /v1/models` round-trip, independent of session state so
-    /// transport behavior is testable against a real socket (BackendTransportTests).
-    /// Classification: HTTP non-success via <see cref="ErrorHandler.CategorizeHttpStatus"/>,
-    /// unparseable JSON as InvalidResponseShape, cancellation as Timeout,
-    /// connection failure as ServerUnavailable.
-    /// </summary>
-    public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec)
+    /// <summary>The raw `GET /v1/models` round-trip, sending `apiKey` as a bearer token when given.</summary>
+    public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec, string apiKey = null)
     {
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            return UnsendableKeyError();
+        }
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(timeoutSec));
             using HttpRequestMessage request = new(HttpMethod.Get, ModelsUrl(normalizedBase));
+            UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
+            JObject redirect = RedirectError(response);
+            if (redirect != null)
+            {
+                return redirect;
+            }
             if (!response.IsSuccessStatusCode)
             {
                 return PromptEnhanceAPI.CreateErrorResponse(ErrorHandler.CategorizeHttpStatus(response.StatusCode), PromptEnhanceAPI.ExtractErrorMessage(body));
@@ -186,21 +220,25 @@ public class BackendClient
         }
     }
 
-    /// <summary>
-    /// API route: the enhance call. Validates the prompt before touching any
-    /// session state, resolves settings, requires a configured model, probes
-    /// reachability, parses media, then delegates to <see cref="ExecuteChat"/>.
-    /// Every early exit is a classified error response.
-    /// </summary>
-    public static async Task<JObject> PromptEnhanceRun(JObject rawInput, Session session)
+    /// <summary>API route: the enhance call.</summary>
+    [API.APIDescription("Sends a prompt, and optionally images, to the configured backend's `POST /v1/chat/completions` with the user's system prompt and sampling settings, and returns the rewritten prompt. Sends the user's PromptEnhance API key, if set.",
+        """
+            "success": true,
+            "response": "A weathered stone lighthouse on a rocky headland at dusk, ..."
+            // on failure: "success": false, "error": "The request to the LLM backend timed out ...", "error_id": "timeout"
+            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, generic
+        """)]
+    public static async Task<JObject> PromptEnhanceRun(
+        [API.APIParameter("The request body: `prompt` (string, required, the text to enhance) and optional `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: 'image/png' or similar } sent to the model as images.")] JObject raw,
+        Session session)
     {
-        string userText = rawInput?["prompt"]?.ToString();
+        string userText = raw?["prompt"]?.ToString();
         if (string.IsNullOrWhiteSpace(userText))
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No prompt text was provided to enhance.");
         }
         JObject error = null;
-        (JObject settings, string normalizedBase) = await ResolveConfig(session, e => error = e);
+        (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
         {
             return error;
@@ -217,29 +255,26 @@ public class BackendClient
         string systemPrompt = settings["systemPrompt"]?.ToString();
         double temperature = settings["temperature"]?.Value<double?>() ?? 0.7;
         int maxTokens = settings["maxTokens"]?.Value<int?>() ?? 1024;
-        int timeoutSec = settings["timeoutSeconds"]?.Value<int?>() ?? 60;
+        int timeoutSec = ResolveTimeoutSeconds(settings);
         List<BackendSchema.MediaContent> media;
         try
         {
-            media = ParseMedia(rawInput?["media"] as JArray);
+            media = ParseMedia(raw?["media"] as JArray);
         }
         catch (ArgumentException ex)
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
         }
-        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec);
+        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey);
     }
 
-    /// <summary>
-    /// The raw `POST /v1/chat/completions` round-trip (session-independent,
-    /// socket-tested like <see cref="ExecuteListModels"/>). A 400 on a request
-    /// that carried media is reclassified as UnsupportedImage when the body
-    /// blames the image (<see cref="ErrorHandler.LooksLikeImageRejection"/>),
-    /// so vision-incapable models produce an actionable error instead of a
-    /// generic HTTP failure.
-    /// </summary>
-    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec)
+    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
+    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null)
     {
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            return UnsendableKeyError();
+        }
         object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
         string json = JsonSerializer.Serialize(requestBody);
         try
@@ -249,8 +284,14 @@ public class BackendClient
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
+            UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
+            JObject redirect = RedirectError(response);
+            if (redirect != null)
+            {
+                return redirect;
+            }
             if (!response.IsSuccessStatusCode)
             {
                 PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
@@ -280,12 +321,7 @@ public class BackendClient
         }
     }
 
-    /// <summary>
-    /// Boundary adapter for the request's media array. A present-but-dataless
-    /// entry throws ArgumentException (classified upstream as UnsupportedImage)
-    /// rather than silently sending a text-only request the user believes
-    /// included their image.
-    /// </summary>
+    /// <summary>Parses the request's media array. A present-but-dataless entry throws ArgumentException.</summary>
     public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
     {
         List<BackendSchema.MediaContent> result = [];

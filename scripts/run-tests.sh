@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Canonical reproduction of every committed validation gate.
-#
-# SwarmUI's extension.props hard-requires the extension to live inside a host
-# checkout at src/Extensions/PromptEnhance (it references ../../GlobalUsings.cs
-# and ../../bin/live_release/SwarmUI.dll), so the working tree IS the build
-# tree: one git checkout placed in the host, no copy step.
+# Runs every committed validation gate in the host layout (<SwarmUI>/src/Extensions/PromptEnhance).
 set -euo pipefail
+
+# xunit.v3 >=3.2.0 bundles MTP telemetry; suppress it here as on the other gate surfaces.
+export TESTINGPLATFORM_TELEMETRY_OPTOUT=1
 
 HOST="${SWARMUI_ROOT:?Set SWARMUI_ROOT to a SwarmUI checkout (git clone https://github.com/mcmonkeyprojects/SwarmUI)}"
 if [ ! -f "$HOST/src/SwarmUI.csproj" ]; then
@@ -26,10 +24,22 @@ fi
 echo "[run-tests] Frontend build parity (Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output)…"
 ( cd "$DEST" && npm ci && npm run check:frontend-parity )
 
+echo "[run-tests] Lint (Biome)…"
+( cd "$DEST" && npm run lint )
+
+echo "[run-tests] README screenshots match the current UI…"
+( cd "$DEST" && npm run shots:check )
+
 echo "[run-tests] Frontend suite (compiled TypeScript tests against the emitted Assets/*.js, real jsdom)…"
 ( cd "$DEST" && npm run test:frontend )
 
 echo "[run-tests] C# suite (dotnet test against the real SwarmUI host)…"
 dotnet test "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug
+
+echo "[run-tests] C# suite (Microsoft Testing Platform via dotnet test)…"
+dotnet test "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug -p:TestingPlatformDotnetTestSupport=true
+
+echo "[run-tests] C# suite (Microsoft Testing Platform stand-alone executable)…"
+dotnet run --project "$DEST/Tests/PromptEnhance.Tests.csproj" -c Debug
 
 echo "[run-tests] OK — all gates passed."

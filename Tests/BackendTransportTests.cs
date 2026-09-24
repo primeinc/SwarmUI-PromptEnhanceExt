@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -28,7 +29,7 @@ public class BackendTransportTests
         using MockHttpServer server = new(404, "Not Found", "{\"error\":{\"message\":\"no such route\"}}");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
         Xunit.Assert.False(r["success"]!.Value<bool>());
-        Xunit.Assert.Equal("model_missing", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("model_missing", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -36,7 +37,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(500, "Internal Server Error", "boom");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
-        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -44,7 +45,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", "this is not json");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
-        Xunit.Assert.Equal("invalid_response_shape", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("invalid_response_shape", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -61,7 +62,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(401, "Unauthorized", "{\"error\":{\"message\":\"missing key\"}}");
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 30);
-        Xunit.Assert.Equal("authentication", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -69,7 +70,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", "{ not valid json");
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 30);
-        Xunit.Assert.Equal("invalid_response_shape", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("invalid_response_shape", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -78,7 +79,7 @@ public class BackendTransportTests
         using MockHttpServer server = new(400, "Bad Request", "{\"error\":{\"message\":\"this model does not support image input\"}}");
         List<BackendSchema.MediaContent> media = [new() { Type = "base64", Data = "QUJD", MediaType = "image/png" }];
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "describe", media, 0.7, 1024, 30);
-        Xunit.Assert.Equal("unsupported_image", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("unsupported_image", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -87,7 +88,29 @@ public class BackendTransportTests
         using MockHttpServer server = new(400, "Bad Request", "{\"error\":{\"message\":\"maximum context length exceeded\"}}");
         List<BackendSchema.MediaContent> media = [new() { Type = "base64", Data = "QUJD", MediaType = "image/png" }];
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "describe", media, 0.7, 1024, 30);
-        Xunit.Assert.Equal("http_error", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("http_error", r["error_id"]!.Value<string>());
+    }
+
+    [Xunit.Theory]
+    [Xunit.InlineData(301, "Moved Permanently")]
+    [Xunit.InlineData(302, "Found")]
+    [Xunit.InlineData(307, "Temporary Redirect")]
+    [Xunit.InlineData(308, "Permanent Redirect")]
+    public async Task Redirects_AreNotFollowed_AndReportedWithTheirTarget(int status, string reason)
+    {
+        using MockHttpServer elsewhere = new(200, "OK", ChatBody);
+        using MockHttpServer server = new(status, reason, "", location: $"{elsewhere.BaseUrl}/v1/chat/completions");
+        JObject chat = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "secret prompt", [], 0.7, 1024, 30);
+        JObject models = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
+        Xunit.Assert.Empty(elsewhere.RequestHeads);
+        Xunit.Assert.Equal(2, server.RequestHeads.Count);
+        foreach (JObject r in new[] { chat, models })
+        {
+            Xunit.Assert.False(r["success"]!.Value<bool>());
+            Xunit.Assert.Equal("http_error", r["error_id"]!.Value<string>());
+            Xunit.Assert.Contains("redirect", r["error"]!.Value<string>(), StringComparison.OrdinalIgnoreCase);
+            Xunit.Assert.Contains(elsewhere.BaseUrl, r["error"]!.Value<string>());
+        }
     }
 
     [Xunit.Fact]
@@ -95,7 +118,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", ChatBody, delayMs: 3000);
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 1);
-        Xunit.Assert.Equal("timeout", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("timeout", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -106,7 +129,34 @@ public class BackendTransportTests
         int deadPort = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         JObject r = await WebAPI.BackendClient.ExecuteChat($"http://127.0.0.1:{deadPort}", "m", "sys", "hi", [], 0.7, 1024, 5);
-        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_DeadBackend_ClassifiesServerUnavailable()
+    {
+        TcpListener probe = new(IPAddress.Loopback, 0);
+        probe.Start();
+        int deadPort = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://127.0.0.1:{deadPort}\"}}");
+        JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.False(r["success"]!.Value<bool>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_LiveBackend_PassesProbeAndReturnsModels()
+    {
+        using MockHttpServer server = new(200, "OK", ModelsBody);
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"{server.BaseUrl}\"}}");
+        JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.True(r["success"]!.Value<bool>());
+        JArray models = (JArray)r["models"]!;
+        Xunit.Assert.Single(models);
+        Xunit.Assert.Equal("mock-enhancer", ((JObject)models[0])["id"]!.Value<string>());
     }
 }
 
@@ -117,14 +167,19 @@ internal sealed class MockHttpServer : IDisposable
     private readonly string _reason;
     private readonly string _body;
     private readonly int _delayMs;
+    private readonly string? _location;
     private volatile bool _stop;
 
-    public MockHttpServer(int status, string reason, string body, int delayMs = 0)
+    /// <summary>The header block (request line plus headers) of every request received, in arrival order.</summary>
+    public readonly ConcurrentQueue<string> RequestHeads = new();
+
+    public MockHttpServer(int status, string reason, string body, int delayMs = 0, string? location = null)
     {
         _status = status;
         _reason = reason;
         _body = body;
         _delayMs = delayMs;
+        _location = location;
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         _ = Task.Run(AcceptLoopAsync);
@@ -187,6 +242,9 @@ internal sealed class MockHttpServer : IDisposable
                 catch
                 {
                 }
+                string raw = Encoding.ASCII.GetString(received.ToArray());
+                int end = raw.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                RequestHeads.Enqueue(end >= 0 ? raw[..end] : raw);
 
                 if (_delayMs > 0)
                 {
@@ -197,6 +255,10 @@ internal sealed class MockHttpServer : IDisposable
                 StringBuilder head = new();
                 head.Append($"HTTP/1.1 {_status} {_reason}\r\n");
                 head.Append("Content-Type: application/json\r\n");
+                if (_location != null)
+                {
+                    head.Append($"Location: {_location}\r\n");
+                }
                 head.Append($"Content-Length: {bodyBytes.Length}\r\n");
                 head.Append("Connection: close\r\n\r\n");
                 byte[] headBytes = Encoding.ASCII.GetBytes(head.ToString());

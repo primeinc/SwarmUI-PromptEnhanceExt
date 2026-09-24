@@ -1,23 +1,31 @@
 "use strict";
 /**
- * Boundary contracts shared by settings.ts and promptenhance.ts.
+ * Boundary contracts shared by settings.ts and promptenhance.ts: route names, numeric bounds,
+ * defaults, and the wire adapters. Loaded first (PromptEnhanceExtension.OnPreInit).
  *
- * This file owns every adapter that normalizes loosely shaped input crossing
- * an ownership boundary: SwarmUI API responses, transport errors, and the
- * settings schema. It is registered FIRST in Extension.ScriptFiles so its
- * declarations exist before either feature script runs a handler.
- *
- * AUTHORITATIVE SOURCE: Frontend/contracts.ts. The committed Assets/contracts.js
- * is tsc build output — do not hand-edit it.
+ * AUTHORITATIVE SOURCE: Frontend/contracts.ts. The committed Assets/contracts.js is tsc build
+ * output — do not hand-edit it.
  */
-window.PromptEnhance = window.PromptEnhance || {};
-PromptEnhance.REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
-/**
- * Client-side mirror of SessionSettings.Defaults (WebAPI/SessionSettings.cs).
- * SettingsDefaultsParityTests pins the systemPrompt text verbatim against the
- * server default; if you change one side, the committed gate fails.
- */
-const PE_DEFAULT_SETTINGS = {
+/** The prompt-application policies, mirrored from contracts/pe-contract.json. */
+let PE_REPLACE_MODES = ['preview', 'append', 'replace_with_restore'];
+/** API route names, mirrored from contracts/pe-contract.json. */
+let PE_ROUTES = {
+    listModels: 'PromptEnhanceListModels',
+    run: 'PromptEnhanceRun',
+    getSettings: 'GetPromptEnhanceSettings',
+    saveSettings: 'SavePromptEnhanceSettings',
+    resetSettings: 'ResetPromptEnhanceSettings'
+};
+/** Key type of the backend API key in SwarmUI's User → API Keys table, mirrored from contracts/pe-contract.json. */
+let PE_API_KEY_TYPE = 'promptenhance_api';
+/** Numeric input bounds, mirrored from contracts/pe-contract.json. */
+let PE_LIMITS = {
+    timeoutSeconds: { min: 1, max: 3600 },
+    temperature: { min: 0, max: 2 },
+    maxTokens: { min: 1, max: 2147483647 }
+};
+/** Settings defaults, mirrored from contracts/pe-contract.json. */
+let PE_DEFAULT_SETTINGS = {
     baseUrl: 'http://localhost:11434',
     model: '',
     timeoutSeconds: 60,
@@ -27,104 +35,113 @@ const PE_DEFAULT_SETTINGS = {
     sendSelectedImage: false,
     replaceMode: 'preview'
 };
-PromptEnhance.settings = Object.assign({}, PE_DEFAULT_SETTINGS, PromptEnhance.settings);
-/** The full settings view: server-loaded values over defaults, never partial. */
-function peEffectiveSettings() {
-    return Object.assign({}, PE_DEFAULT_SETTINGS, PromptEnhance.settings);
-}
+/** True for any non-null object. */
 function peIsRecord(value) {
-    return typeof value === 'object' && value !== null;
+    return typeof value == 'object' && value != null;
 }
-/**
- * Normalizes a genericRequest error-callback value (string, Error, or
- * arbitrary host object) into user-presentable text. Nothing is dropped:
- * unrecognized shapes fall back to a stable generic message.
- */
+/** Normalizes a genericRequest error-callback value (string, Error, or arbitrary host object) into text. */
 function peErrorText(err) {
     if (err instanceof Error && err.message) {
         return err.message;
     }
-    if (peIsRecord(err) && typeof err.message === 'string' && err.message) {
+    if (peIsRecord(err) && typeof err.message == 'string' && err.message) {
         return err.message;
     }
-    if (typeof err === 'string' && err) {
+    if (typeof err == 'string' && err) {
         return err;
     }
     return 'request error';
 }
-/** Reads the API envelope's error text, if the response carries one. */
-function peEnvelopeError(data, fallback) {
-    if (peIsRecord(data) && typeof data.error === 'string' && data.error) {
-        return data.error;
+/** Narrows an arbitrary value to a replace mode, or null. */
+function peReplaceModeOf(value) {
+    for (let mode of PE_REPLACE_MODES) {
+        if (value === mode) {
+            return mode;
+        }
     }
-    return fallback;
+    return null;
 }
 /**
- * Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult.
- * Accepts only `success: true` with an object `settings` payload; every key is
- * copied only when it matches the schema type, so a corrupted store can never
- * leak a wrongly typed value into the client settings state.
+ * Builds a complete, in-bounds settings value from raw form input over `current`: numeric fields
+ * parse and clamp to PE_LIMITS, unparseable numbers and unknown modes keep the current value, and
+ * an empty model keeps the current model.
  */
+function peNormalizeSettings(raw, current) {
+    let num = (text, fallback) => {
+        let value = Number.parseFloat(text ?? '');
+        return Number.isFinite(value) ? value : fallback;
+    };
+    let clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    return {
+        baseUrl: (raw.baseUrl ?? current.baseUrl).trim(),
+        model: raw.model || current.model,
+        timeoutSeconds: clamp(Math.round(num(raw.timeoutSeconds, current.timeoutSeconds)), PE_LIMITS.timeoutSeconds.min, PE_LIMITS.timeoutSeconds.max),
+        systemPrompt: raw.systemPrompt ?? current.systemPrompt,
+        temperature: clamp(num(raw.temperature, current.temperature), PE_LIMITS.temperature.min, PE_LIMITS.temperature.max),
+        maxTokens: clamp(Math.round(num(raw.maxTokens, current.maxTokens)), PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max),
+        sendSelectedImage: raw.sendSelectedImage ?? current.sendSelectedImage,
+        replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
+    };
+}
+/**
+ * The adapters below see only responses SwarmUI's genericRequest passed to the success callback;
+ * any response carrying `error` goes to the error callback instead (site.js). A failed result here
+ * therefore means a success response of the wrong shape.
+ */
+/** Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult. Accepts only `success: true` with an object `settings` payload; each key is copied only when it matches the schema type. */
 function peAdaptSettingsResult(data) {
     if (!peIsRecord(data) || data.success !== true || !peIsRecord(data.settings)) {
-        return { ok: false, error: peEnvelopeError(data, 'Settings request failed.') };
+        return { ok: false, error: 'The server returned settings in an unexpected shape.' };
     }
-    const raw = data.settings;
-    const settings = {};
-    if (typeof raw.baseUrl === 'string') {
+    let raw = data.settings;
+    let settings = {};
+    if (typeof raw.baseUrl == 'string') {
         settings.baseUrl = raw.baseUrl;
     }
-    if (typeof raw.model === 'string') {
+    if (typeof raw.model == 'string') {
         settings.model = raw.model;
     }
-    if (typeof raw.timeoutSeconds === 'number' && Number.isFinite(raw.timeoutSeconds)) {
+    if (typeof raw.timeoutSeconds == 'number' && Number.isFinite(raw.timeoutSeconds)) {
         settings.timeoutSeconds = raw.timeoutSeconds;
     }
-    if (typeof raw.systemPrompt === 'string') {
+    if (typeof raw.systemPrompt == 'string') {
         settings.systemPrompt = raw.systemPrompt;
     }
-    if (typeof raw.temperature === 'number' && Number.isFinite(raw.temperature)) {
+    if (typeof raw.temperature == 'number' && Number.isFinite(raw.temperature)) {
         settings.temperature = raw.temperature;
     }
-    if (typeof raw.maxTokens === 'number' && Number.isFinite(raw.maxTokens)) {
+    if (typeof raw.maxTokens == 'number' && Number.isFinite(raw.maxTokens)) {
         settings.maxTokens = raw.maxTokens;
     }
-    if (typeof raw.sendSelectedImage === 'boolean') {
+    if (typeof raw.sendSelectedImage == 'boolean') {
         settings.sendSelectedImage = raw.sendSelectedImage;
     }
-    if (raw.replaceMode === 'preview' || raw.replaceMode === 'append' || raw.replaceMode === 'replace_with_restore') {
-        settings.replaceMode = raw.replaceMode;
+    let mode = peReplaceModeOf(raw.replaceMode);
+    if (mode) {
+        settings.replaceMode = mode;
     }
     return { ok: true, settings };
 }
-/**
- * Adapter: PromptEnhanceListModels response -> PEModelsResult.
- * An empty model list is classified as a failure — the UI treats "no models"
- * as a configuration problem to surface, never as a silently empty dropdown.
- */
+/** Adapter: PromptEnhanceListModels response -> PEModelsResult. An empty model list is classified as a failure. */
 function peAdaptModelsResult(data) {
     if (!peIsRecord(data) || data.success !== true || !Array.isArray(data.models)) {
-        return { ok: false, error: peEnvelopeError(data, 'Could not fetch models.') };
+        return { ok: false, error: 'The server returned the model list in an unexpected shape.' };
     }
-    const models = [];
-    for (const entry of data.models) {
-        if (peIsRecord(entry) && typeof entry.id === 'string' && entry.id) {
-            models.push({ id: entry.id, name: typeof entry.name === 'string' && entry.name ? entry.name : entry.id });
+    let models = [];
+    for (let entry of data.models) {
+        if (peIsRecord(entry) && typeof entry.id == 'string' && entry.id) {
+            models.push({ id: entry.id, name: typeof entry.name == 'string' && entry.name ? entry.name : entry.id });
         }
     }
-    if (models.length === 0) {
-        return { ok: false, error: peEnvelopeError(data, 'Could not fetch models.') };
+    if (models.length == 0) {
+        return { ok: false, error: 'The backend lists no models.' };
     }
     return { ok: true, models };
 }
-/**
- * Adapter: PromptEnhanceRun response -> PEEnhanceResult.
- * Success requires a non-empty string `response`; anything else is a
- * classified failure carrying the server's error text when present.
- */
+/** Adapter: PromptEnhanceRun response -> PEEnhanceResult. Success requires a non-empty string `response`. */
 function peAdaptEnhanceResult(data) {
-    if (peIsRecord(data) && data.success === true && typeof data.response === 'string' && data.response.length > 0) {
+    if (peIsRecord(data) && data.success === true && typeof data.response == 'string' && data.response.length > 0) {
         return { ok: true, response: data.response };
     }
-    return { ok: false, error: peEnvelopeError(data, 'enhancement failed.') };
+    return { ok: false, error: 'The server returned the enhancement in an unexpected shape.' };
 }

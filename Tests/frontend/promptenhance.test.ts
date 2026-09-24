@@ -1,24 +1,55 @@
 /**
- * Behavior tests for the PromptEnhance frontend, run against the EMITTED
- * Assets/*.js build output (the exact files SwarmUI serves), loaded into a
- * real jsdom page modeled on SwarmUI's Generate-tab DOM.
+ * Behavior tests for the PromptEnhance frontend, run against the EMITTED Assets/*.js build output
+ * (the exact files SwarmUI serves) together with SwarmUI's real util.js, loaded into a jsdom page
+ * modeled on SwarmUI's Generate-tab DOM. The settings modal needs SwarmUI's site.js and Bootstrap
+ * and is covered by the browser gates (Tests/ui).
  *
- * AUTHORITATIVE SOURCE: this .ts file; it is compiled by Tests/frontend/tsconfig.json
- * into the gitignored Tests/frontend/out/ directory and run with node.
+ * AUTHORITATIVE SOURCE: this .ts file; it is compiled by Tests/frontend/tsconfig.json into the
+ * gitignored Tests/frontend/out/ directory and run with node.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as assert from 'node:assert';
-import { JSDOM, DOMWindow } from 'jsdom';
+import { JSDOM, type DOMWindow } from 'jsdom';
 
-const ASSETS = path.join(__dirname, '..', '..', '..', 'Assets');
+const REPO = path.join(__dirname, '..', '..', '..');
+const ASSETS = path.join(REPO, 'Assets');
 const CONTRACTS_SRC = fs.readFileSync(path.join(ASSETS, 'contracts.js'), 'utf8');
 const SETTINGS_SRC = fs.readFileSync(path.join(ASSETS, 'settings.js'), 'utf8');
 const PROMPT_SRC = fs.readFileSync(path.join(ASSETS, 'promptenhance.js'), 'utf8');
 
+/** SwarmUI's util.js: vendored standalone workspace first, then the host layout `<SwarmUI>/src/Extensions/PromptEnhance`. */
+function readHostUtilJs(): string {
+    const candidates = [
+        path.join(REPO, 'vendor', 'SwarmUI', 'src', 'wwwroot', 'js', 'util.js'),
+        path.join(REPO, '..', '..', 'wwwroot', 'js', 'util.js'),
+    ];
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return fs.readFileSync(candidate, 'utf8');
+        }
+    }
+    throw new Error(`SwarmUI util.js not found; looked in: ${candidates.join(', ')}. Run \`just vendor-sync\` or place the extension in a SwarmUI checkout.`);
+}
+const UTIL_SRC = readHostUtilJs();
+
+interface PEContractFile {
+    routes: Record<string, string>;
+    apiKeyType: string;
+    errorCategories: Record<string, string>;
+    store: { dataname: string; name: string };
+    settings: Record<string, { type: string; default: unknown; min?: number; max?: number; enum?: string[] }>;
+}
+const CONTRACT: PEContractFile = JSON.parse(fs.readFileSync(path.join(REPO, 'contracts', 'pe-contract.json'), 'utf8'));
+
+/** SwarmUI's prompt region markup (src/Pages/_Generate/GenerateTab.cshtml). */
 const PAGE_HTML = `<!DOCTYPE html><html><body>
   <div class="current_image drag_image_target" id="current_image"></div>
-  <div class="alt_prompt_region drag_image_target" id="alt_prompt_region">
+  <div class="alt_prompt_region drag_image_target drag_audio_target" id="alt_prompt_region">
+    <div id="alt_prompt_extra_area" class="alt_prompt_extra_area">
+      <button id="alt_prompt_image_clear_button" style="display: none;">Clear Attachments</button>
+      <div class="added-image-area alt-prompt-added-image-area" id="alt_prompt_image_area"></div>
+    </div>
     <div class="alt_prompt_main_line">
       <div class="alt_prompt_textboxes">
         <textarea id="alt_prompt_textbox" rows="1"></textarea>
@@ -28,7 +59,8 @@ const PAGE_HTML = `<!DOCTYPE html><html><body>
   </div>
 </body></html>`;
 
-const BARE_HTML = '<!DOCTYPE html><html><body></body></html>';
+/** Host functions the harness stubs in place of SwarmUI's site.js and genpage scripts. */
+const HOST_STUBS = ['genericRequest', 'showError', 'triggerChangeFor', 'genTabLayout', 'sessionReadyCallbacks'];
 
 interface RecordedCall {
     route: string;
@@ -40,6 +72,7 @@ interface BootCalls {
     showError: string[];
     alerts: string[];
     consoleErrors: string[];
+    consoleWarns: string[];
 }
 
 interface BootOpts {
@@ -49,21 +82,43 @@ interface BootOpts {
     backendResponse?: unknown;
     routeResponses?: Record<string, unknown>;
     routeErrors?: Record<string, unknown>;
-    fetch?: (url: string) => Promise<{ blob(): Promise<Blob> }>;
-    pageHtml?: string;
     throwingShowError?: boolean;
+    genTabLayout?: SwarmGenTabLayout;
+    /** When true, boot leaves `sessionReadyCallbacks` unfired; the test fires them via `fireSessionReady`. */
+    holdSessionReady?: boolean;
+}
+
+/** The members of `promptEnhanceGenTab` (Frontend/promptenhance.ts) these tests drive. */
+interface PEGenTabSurface {
+    ready: Promise<void> | null;
+    lastOriginal: string | null;
+    mount(): void;
+    handleEnhance(): Promise<void>;
+    applyEnhancement(original: string, enhanced: string): void;
+    showError(message: string): void;
+}
+
+/** The members of `promptEnhanceSettings` (Frontend/settings.ts) these tests drive. */
+interface PESettingsSurface {
+    effective(): PESettings;
+    apply(settings: Partial<PESettings>): void;
+}
+
+/** The extension's global surface as the page sees it; `let` and `class` globals are read through the page realm. */
+interface PEGlobals {
+    genTab: PEGenTabSurface;
+    settings: PESettingsSurface;
+    PE_ROUTES: PERoutes;
+    PE_API_KEY_TYPE: string;
+    PE_LIMITS: PELimits;
+    PE_REPLACE_MODES: readonly PEReplaceMode[];
+    PE_DEFAULT_SETTINGS: PESettings;
+    peAdaptSettingsResult: (data: unknown) => PESettingsResult;
+    peNormalizeSettings: (raw: PERawSettingsInput, current: PESettings) => PESettings;
 }
 
 type PETestWindow = DOMWindow & {
-    PromptEnhance: PromptEnhanceNamespace;
-    peAddPromptButtons: () => void;
-    peHandleEnhance: () => Promise<void>;
-    peApplyEnhancement: (original: string, enhanced: string) => void;
-    peEnsureButtons: (attempt?: number) => void;
-    peSaveSettings: () => Promise<boolean>;
-    peResetSettings: () => Promise<boolean>;
-    peFetchModels: () => Promise<void>;
-    peShowError: (message: string) => void;
+    sessionReadyCallbacks: (() => void)[];
 };
 
 interface BootResult {
@@ -71,15 +126,19 @@ interface BootResult {
     win: PETestWindow;
     doc: Document;
     calls: BootCalls;
+    pe: PEGlobals;
+    /** Fires SwarmUI's session-ready hooks the way genpage main.js does, then awaits the startup they begin. */
+    fireSessionReady: () => Promise<void>;
 }
 
 async function boot(opts: BootOpts): Promise<BootResult> {
-    const calls: BootCalls = { genericRequest: [], showError: [], alerts: [], consoleErrors: [] };
-    const dom = new JSDOM(opts.pageHtml ?? PAGE_HTML, { runScripts: 'dangerously', url: 'http://localhost/' });
+    const calls: BootCalls = { genericRequest: [], showError: [], alerts: [], consoleErrors: [], consoleWarns: [] };
+    const dom = new JSDOM(PAGE_HTML, { runScripts: 'dangerously', url: 'http://localhost/' });
     const win = dom.window as PETestWindow;
     const doc = win.document;
+    const host = win as unknown as Record<string, unknown>;
 
-    win.genericRequest = ((route: string, payload: object, onSuccess: (data: unknown) => void, _depth?: number, onError?: (err: unknown) => void) => {
+    host.genericRequest = (route: string, payload: object, onSuccess: (data: unknown) => void, _depth?: number, onError?: (err: unknown) => void) => {
         calls.genericRequest.push({ route, payload: payload as RecordedCall['payload'] });
         if (opts.routeErrors && route in opts.routeErrors) {
             (onError ?? (() => { }))(opts.routeErrors[route]);
@@ -87,25 +146,34 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         }
         const resp = (opts.routeResponses && route in opts.routeResponses)
             ? opts.routeResponses[route]
-            : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
+            : route === 'GetPromptEnhanceSettings'
+                ? { success: true, settings: {} }
+                : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
+        const hostError = (resp as { error?: unknown }).error;
+        if (hostError) {
+            // site.js genericRequest hands any response carrying `error` to the error handler, as the bare string.
+            (onError ?? (() => { }))(hostError);
+            return;
+        }
         onSuccess(resp);
-    }) as unknown as typeof win.genericRequest;
-    if (opts.throwingShowError) {
-        win.showError = () => { throw new Error('host banner is broken'); };
-    } else {
-        win.showError = (m: string) => { calls.showError.push(m); };
-    }
-    win.alert = ((m: string) => { calls.alerts.push(m); }) as typeof win.alert;
+    };
+    host.showError = opts.throwingShowError
+        ? () => { throw new Error('host banner is broken'); }
+        : (message: string) => { calls.showError.push(message); };
+    win.alert = ((message: string) => { calls.alerts.push(message); }) as typeof win.alert;
     const realConsoleError = win.console.error.bind(win.console);
     win.console.error = ((...args: unknown[]) => {
         calls.consoleErrors.push(args.map(String).join(' '));
         realConsoleError(...args);
     }) as typeof win.console.error;
-    win.triggerChangeFor = () => { };
-    if (opts.fetch) {
-        win.fetch = opts.fetch as unknown as typeof win.fetch;
-    }
-
+    const realConsoleWarn = win.console.warn.bind(win.console);
+    win.console.warn = ((...args: unknown[]) => {
+        calls.consoleWarns.push(args.map(String).join(' '));
+        realConsoleWarn(...args);
+    }) as typeof win.console.warn;
+    host.triggerChangeFor = () => { };
+    host.genTabLayout = opts.genTabLayout ?? { altPromptSizeHandle: () => { } };
+    win.sessionReadyCallbacks = [];
     if (opts.prompt !== undefined) {
         (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = opts.prompt;
     }
@@ -115,21 +183,34 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         doc.getElementById('current_image')!.appendChild(img);
     }
 
-    for (const src of [CONTRACTS_SRC, SETTINGS_SRC, PROMPT_SRC]) {
-        const s = doc.createElement('script');
-        s.textContent = src;
-        doc.body.appendChild(s);
+    for (const src of [UTIL_SRC, CONTRACTS_SRC, SETTINGS_SRC, PROMPT_SRC]) {
+        const script = doc.createElement('script');
+        script.textContent = src;
+        doc.body.appendChild(script);
     }
-    assert.strictEqual(typeof win.peAddPromptButtons, 'function', 'peAddPromptButtons must load as a real window function');
-    assert.strictEqual(typeof win.peHandleEnhance, 'function', 'peHandleEnhance must load as a real window function');
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
+    const pe = win.eval(`({
+        genTab: promptEnhanceGenTab,
+        settings: promptEnhanceSettings,
+        PE_ROUTES, PE_API_KEY_TYPE, PE_LIMITS, PE_REPLACE_MODES, PE_DEFAULT_SETTINGS,
+        peAdaptSettingsResult, peNormalizeSettings
+    })`) as PEGlobals;
+    const fireSessionReady = async () => {
+        for (const callback of win.sessionReadyCallbacks) {
+            callback();
+        }
+        await pe.genTab.ready;
+    };
+    if (!opts.holdSessionReady) {
+        await fireSessionReady();
+    }
     if (opts.settings) {
-        win.PromptEnhance.settings = opts.settings;
+        pe.settings.apply(opts.settings);
     }
-    return { dom, win, doc, calls };
+    return { dom, win, doc, calls, pe, fireSessionReady };
+}
+
+function promptValue(doc: Document): string {
+    return (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value;
 }
 
 const tests: { name: string; fn: () => void | Promise<void> }[] = [];
@@ -137,284 +218,241 @@ function test(name: string, fn: () => void | Promise<void>): void {
     tests.push({ name, fn });
 }
 
-test('Injects a REAL button bar into the REAL .alt_prompt_region and parses its markup', async () => {
-    const { win, doc } = await boot({});
-    win.peAddPromptButtons();
-
+test('Mounts the bar at the top of #alt_prompt_extra_area with the preview right after it', async () => {
+    const { doc } = await boot({});
     const bar = doc.getElementById('pe_button_bar');
-    assert.ok(bar, '#pe_button_bar must exist as a real element after injection');
-    const region = doc.getElementById('alt_prompt_region')!;
-    assert.ok(region.contains(bar), '#pe_button_bar must be a real child of .alt_prompt_region');
-
-    const enhance = doc.getElementById('pe_enhance_btn');
-    assert.ok(enhance, '#pe_enhance_btn must be a real parsed element (proves innerHTML was really parsed)');
-    assert.strictEqual(enhance.tagName, 'BUTTON', '#pe_enhance_btn must be a real <button>');
-    assert.ok(doc.getElementById('pe_settings_button'), '#pe_settings_button must be a real parsed element');
-    assert.strictEqual(bar.querySelector('#pe_enhance_btn'), enhance, 'querySelector inside the bar resolves the same real button node');
+    assert.ok(bar, '#pe_button_bar exists after session-ready startup');
+    const area = doc.getElementById('alt_prompt_extra_area')!;
+    assert.strictEqual(area.firstElementChild, bar, '#pe_button_bar is the first child of #alt_prompt_extra_area');
+    assert.strictEqual(bar.nextElementSibling, doc.getElementById('pe_preview'), '#pe_preview follows the bar');
+    assert.strictEqual(doc.getElementById('pe_enhance_btn')!.tagName, 'BUTTON', 'Enhance is a real button');
+    assert.ok(doc.getElementById('pe_enhance_btn')!.classList.contains('basic-button'), 'Enhance uses SwarmUI button styling');
+    assert.ok(doc.getElementById('pe_settings_button'), 'the settings button is mounted');
 });
 
-test('Injection is idempotent: a second peAddPromptButtons() does not duplicate the bar', async () => {
-    const { win, doc } = await boot({});
-    win.peAddPromptButtons();
-    win.peAddPromptButtons();
-    const bars = doc.querySelectorAll('#pe_button_bar');
-    assert.strictEqual(bars.length, 1, 'exactly one #pe_button_bar after two calls (real guard exercised)');
+test('Mounting is idempotent', async () => {
+    const { doc, pe } = await boot({});
+    pe.genTab.mount();
+    assert.strictEqual(doc.querySelectorAll('#pe_button_bar').length, 1, 'exactly one bar after a second mount');
 });
 
-test('A REAL click on the injected Enhance button fires the handler (empty prompt surfaces an error)', async () => {
+test('A real click on Enhance with an empty prompt surfaces an error and sends nothing', async () => {
     const { win, doc, calls } = await boot({ prompt: '' });
-    win.peAddPromptButtons();
-    const btn = doc.getElementById('pe_enhance_btn')!;
-    btn.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
-    assert.strictEqual(calls.showError.length, 1, 'a real click on a real button drives peHandleEnhance');
-    assert.ok(/prompt to enhance/i.test(calls.showError[0]!), 'empty-prompt error text is surfaced');
+    doc.getElementById('pe_enhance_btn')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+    assert.strictEqual(calls.showError.length, 1, 'the click drives handleEnhance');
+    assert.ok(calls.showError[0]!.includes('prompt to enhance'), 'empty-prompt error text is surfaced');
     assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no enhance request for an empty prompt');
 });
 
-test('F3: image-collection failure surfaces an error, does NOT send the request, and clears loading', async () => {
-    const { win, doc, calls } = await boot({
+test('A selected image that does not load as an image surfaces an error, sends nothing, and clears loading', async () => {
+    const { doc, calls, pe } = await boot({
+        prompt: 'a cat',
         settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'blob:current' },
-        fetch: async () => { throw new Error('network down'); }
+        image: { src: 'data:text/html;base64,PHA+NDA0PC9wPg==' }
     });
-    win.peAddPromptButtons();
-    (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = 'a cat';
-    await win.peHandleEnhance();
-    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 0, 'must NOT send the enhance request when an attached image cannot be read');
-    assert.strictEqual(calls.showError.length, 1, 'the failure must be surfaced');
-    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading must clear even on image-collection failure');
+    await pe.genTab.handleEnhance();
+    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no request when the attached image is not an image');
+    assert.strictEqual(calls.showError.length, 1, 'the failure is surfaced');
+    assert.ok(calls.showError[0]!.includes('did not load as an image'), 'the error says why');
+    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
 });
 
-test('F3: a valid selected image is read via the REAL FileReader and attached as base64 media', async () => {
-    const { win, doc, calls } = await boot({
+test('A selected image is read through SwarmUI\'s imageToData and attached as base64 media', async () => {
+    const { calls, pe } = await boot({
+        prompt: 'a cat',
         settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'blob:current' },
-        fetch: async () => ({ blob: async () => new win.Blob([new Uint8Array([65, 66, 67])], { type: 'image/png' }) })
+        image: { src: 'data:image/png;base64,QUJD' }
     });
-    win.peAddPromptButtons();
-    (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = 'a cat';
-    await win.peHandleEnhance();
+    await pe.genTab.handleEnhance();
     const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1, 'one enhance request should be sent');
+    assert.strictEqual(runs.length, 1, 'one enhance request');
     const media = runs[0]!.payload.media;
-    assert.ok(Array.isArray(media) && media.length === 1, 'media should carry one image part');
-    assert.strictEqual(media[0]!.data, 'QUJD', 'base64 from the real FileReader should be forwarded');
-    assert.strictEqual(media[0]!.mediaType, 'image/png', 'media type from the real Blob should be forwarded');
+    assert.ok(Array.isArray(media) && media.length === 1, 'one image part');
+    assert.strictEqual(media[0]!.data, 'QUJD', 'base64 read by the host helper');
+    assert.strictEqual(media[0]!.mediaType, 'image/png', 'media type from the data URL');
 });
 
-test('No image selected is a legitimate text-only request (not a hard drop)', async () => {
-    const { win, doc, calls } = await boot({ settings: { sendSelectedImage: true, replaceMode: 'preview' } });
-    win.peAddPromptButtons();
-    (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = 'a cat';
-    await win.peHandleEnhance();
+test('No selected image is a text-only request', async () => {
+    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendSelectedImage: true, replaceMode: 'preview' } });
+    await pe.genTab.handleEnhance();
     const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1, 'one enhance request should be sent text-only');
-    assert.strictEqual(runs[0]!.payload.media, undefined, 'no media attached when no image is selected');
+    assert.strictEqual(runs.length, 1, 'one text-only request');
+    assert.strictEqual(runs[0]!.payload.media, undefined, 'no media attached');
 });
 
-test('Loading clears on backend failure and the error is surfaced', async () => {
-    const { win, doc, calls } = await boot({ prompt: 'a cat', backendResponse: { success: false, error: 'boom' } });
-    win.peAddPromptButtons();
-    await win.peHandleEnhance();
-    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1, 'one enhance request was sent');
-    assert.strictEqual(calls.showError.length, 1, 'backend failure must be surfaced');
+test('Loading clears on backend failure and the server error is surfaced', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', backendResponse: { success: false, error: 'boom' } });
+    await pe.genTab.handleEnhance();
+    assert.strictEqual(calls.showError.length, 1, 'backend failure surfaced');
     assert.ok(calls.showError[0]!.includes('boom'), 'the classified server error text is surfaced');
-    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading must clear on failure');
-    assert.ok(!(doc.getElementById('pe_enhance_btn') as HTMLButtonElement).classList.contains('loading'), 'loading class must be removed');
+    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
+    assert.strictEqual(doc.getElementById('pe_enhance_loading')!.style.display, 'none', 'loading indicator hidden');
 });
 
-test('Preview mode does not mutate the real prompt textarea', async () => {
-    const { win, doc } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'preview' } });
-    win.peAddPromptButtons();
-    win.peApplyEnhancement('ORIGINAL', 'ENHANCED');
-    assert.strictEqual((doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value, 'ORIGINAL', 'preview must not touch the prompt until Apply');
-    const preview = doc.getElementById('pe_preview')!;
-    assert.strictEqual(preview.style.display, 'block', 'preview panel is shown');
+test('Preview mode does not touch the prompt until Apply', async () => {
+    const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'preview' } });
+    pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED');
+    assert.strictEqual(promptValue(doc), 'ORIGINAL', 'prompt untouched');
+    assert.strictEqual(doc.getElementById('pe_preview')!.style.display, 'block', 'preview shown');
     assert.strictEqual(doc.getElementById('pe_preview_text')!.textContent, 'ENHANCED', 'preview shows the enhanced text');
+    doc.getElementById('pe_preview_apply')!.click();
+    assert.strictEqual(promptValue(doc), 'ENHANCED', 'Apply replaces the prompt');
+    assert.strictEqual(pe.genTab.lastOriginal, 'ORIGINAL', 'Apply stashes the original for Restore');
 });
 
-test('Append mode keeps the original inline in the real textarea', async () => {
-    const { win, doc } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'append' } });
-    win.peAddPromptButtons();
-    win.peApplyEnhancement('ORIGINAL', 'ENHANCED');
-    const val = (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value;
-    assert.ok(val.indexOf('ORIGINAL') !== -1, 'original must be preserved');
-    assert.ok(val.indexOf('ENHANCED') !== -1, 'enhanced must be appended');
+test('Append mode keeps the original above the enhancement', async () => {
+    const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'append' } });
+    pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED');
+    assert.strictEqual(promptValue(doc), 'ORIGINAL\n\n---\n\nENHANCED');
 });
 
-test('Replace mode replaces the real textarea, stashes the original, and shows the real Restore button', async () => {
-    const { win, doc } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
-    win.peAddPromptButtons();
-    win.peApplyEnhancement('ORIGINAL', 'ENHANCED');
-    assert.strictEqual((doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value, 'ENHANCED', 'prompt is replaced');
-    assert.strictEqual(win.PromptEnhance.lastOriginal, 'ORIGINAL', 'original must be recoverable');
-    assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'inline-block', 'Restore button is shown');
-    doc.getElementById('pe_restore_btn')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-    assert.strictEqual((doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value, 'ORIGINAL', 'Restore returns the original prompt');
+test('Replace mode replaces the prompt and Restore brings the original back', async () => {
+    const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
+    pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED');
+    assert.strictEqual(promptValue(doc), 'ENHANCED', 'prompt replaced');
+    assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'inline-block', 'Restore shown');
+    doc.getElementById('pe_restore_btn')!.click();
+    assert.strictEqual(promptValue(doc), 'ORIGINAL', 'Restore returns the original');
+    assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'none', 'Restore hidden again');
 });
 
-test('Replace mode preserves the TRUE original across a second enhance (Restore is not one-level)', async () => {
-    const { win, doc } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
-    win.peAddPromptButtons();
-    win.peApplyEnhancement('ORIGINAL', 'ENHANCED1');
-    win.peApplyEnhancement('ENHANCED1', 'ENHANCED2');
-    assert.strictEqual((doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value, 'ENHANCED2', 'second enhance replaces the box');
-    assert.strictEqual(win.PromptEnhance.lastOriginal, 'ORIGINAL', 'the earliest original must be preserved, not the intermediate');
-    doc.getElementById('pe_restore_btn')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-    assert.strictEqual((doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value, 'ORIGINAL', 'Restore returns the TRUE original after multiple enhances');
+test('Restore brings back the prompt exactly as typed, while the backend gets it trimmed', async () => {
+    const typed = '  a cat on a mat \n';
+    const { doc, calls, pe } = await boot({ prompt: typed, settings: { replaceMode: 'replace_with_restore' } });
+    await pe.genTab.handleEnhance();
+    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
+    assert.strictEqual(runs[0]!.payload.prompt, 'a cat on a mat', 'the backend gets the trimmed prompt');
+    assert.strictEqual(promptValue(doc), 'ENHANCED PROMPT', 'the prompt is replaced');
+    doc.getElementById('pe_restore_btn')!.click();
+    assert.strictEqual(promptValue(doc), typed, 'Restore returns the untrimmed original');
 });
 
-test('Opening settings mounts a REAL panel into document.body and shows it', async () => {
-    const { win, doc } = await boot({});
-    assert.strictEqual(typeof win.PromptEnhance.openSettingsPanel, 'function', 'openSettingsPanel exported');
-    assert.strictEqual(typeof win.PromptEnhance.loadSettings, 'function', 'loadSettings exported');
-    assert.strictEqual(typeof win.PromptEnhance.fetchModels, 'function', 'fetchModels exported');
-    win.PromptEnhance.openSettingsPanel!();
-    const panel = doc.getElementById('pe_settings_panel');
-    assert.ok(panel, '#pe_settings_panel is a real element in the document');
-    assert.strictEqual(panel.parentNode, doc.body, 'panel is mounted on document.body');
-    assert.strictEqual(panel.style.display, 'block', 'panel is shown');
-    assert.strictEqual(doc.getElementById('pe_save_btn')!.tagName, 'BUTTON', 'a real Save button exists in the panel');
+test('Replace mode keeps the TRUE original across a second enhance', async () => {
+    const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
+    pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED1');
+    pe.genTab.applyEnhancement('ENHANCED1', 'ENHANCED2');
+    assert.strictEqual(promptValue(doc), 'ENHANCED2', 'second enhance replaces the prompt');
+    assert.strictEqual(pe.genTab.lastOriginal, 'ORIGINAL', 'the earliest original is kept');
+    doc.getElementById('pe_restore_btn')!.click();
+    assert.strictEqual(promptValue(doc), 'ORIGINAL', 'Restore returns the true original');
 });
 
-test('No bare generic globals leak onto window (must be pe-prefixed / namespaced)', async () => {
+test('Every window global the extension adds is pe-prefixed', async () => {
+    const hostOnly = new JSDOM(`<!DOCTYPE html><body><script>${UTIL_SRC}</script></body>`, { runScripts: 'dangerously' }).window;
+    const baseline = new Set(Object.keys(hostOnly));
     const { win } = await boot({});
-    for (const generic of ['loadSettings', 'saveSettings', 'resetSettings', 'fetchModels', 'openSettingsPanel', 'closeSettingsPanel']) {
-        assert.strictEqual((win as unknown as Record<string, unknown>)[generic], undefined, `no bare global '${generic}'`);
+    const added = Object.keys(win).filter((key) => !baseline.has(key) && !HOST_STUBS.includes(key));
+    assert.ok(added.includes('peAdaptSettingsResult'), 'control: extension function declarations are visible on window');
+    assert.deepStrictEqual(added.filter((key) => !key.startsWith('pe')), [], 'no unprefixed extension globals on window');
+});
+
+test('Contract: defaults, routes, API key type, replace modes, and bounds match contracts/pe-contract.json exactly', async () => {
+    const { pe } = await boot({});
+    const expectedDefaults: Record<string, unknown> = {};
+    for (const [key, spec] of Object.entries(CONTRACT.settings)) {
+        expectedDefaults[key] = spec.default;
     }
-    assert.strictEqual(typeof win.PromptEnhance.openSettingsPanel, 'function', 'namespaced API present');
+    assert.deepStrictEqual({ ...pe.PE_DEFAULT_SETTINGS }, expectedDefaults, 'defaults equal the contract');
+    assert.deepStrictEqual({ ...pe.settings.effective() }, expectedDefaults, 'boot-time effective settings equal the contract defaults');
+    assert.deepStrictEqual({ ...pe.PE_ROUTES }, CONTRACT.routes, 'routes equal the contract');
+    assert.strictEqual(pe.PE_API_KEY_TYPE, CONTRACT.apiKeyType, 'API key type equals the contract');
+    assert.deepStrictEqual([...pe.PE_REPLACE_MODES], CONTRACT.settings.replaceMode!.enum, 'replace modes equal the contract enum');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(pe.PE_LIMITS)), {
+        timeoutSeconds: { min: CONTRACT.settings.timeoutSeconds!.min, max: CONTRACT.settings.timeoutSeconds!.max },
+        temperature: { min: CONTRACT.settings.temperature!.min, max: CONTRACT.settings.temperature!.max },
+        maxTokens: { min: CONTRACT.settings.maxTokens!.min, max: CONTRACT.settings.maxTokens!.max }
+    }, 'bounds equal the contract');
 });
 
-test('loadSettings merges server settings over defaults and rejects wrongly typed values', async () => {
-    const { win } = await boot({
-        routeResponses: {
-            GetPromptEnhanceSettings: { success: true, settings: { model: 'mock-enhancer', timeoutSeconds: 'ninety', replaceMode: 'append' } }
-        }
+test('Contract: peNormalizeSettings clamps numbers to the contract bounds and keeps current values for bad input', async () => {
+    const { pe } = await boot({});
+    const current = pe.settings.effective();
+    const clamped = pe.peNormalizeSettings({ timeoutSeconds: '999999', temperature: '9.5', maxTokens: '-5', baseUrl: '  http://box:8080/v1  ', model: '' }, { ...current, model: 'stored-model' });
+    assert.strictEqual(clamped.timeoutSeconds, CONTRACT.settings.timeoutSeconds!.max, 'timeout clamps to the max');
+    assert.strictEqual(clamped.temperature, CONTRACT.settings.temperature!.max, 'temperature clamps to the max');
+    assert.strictEqual(clamped.maxTokens, CONTRACT.settings.maxTokens!.min, 'maxTokens clamps to the floor');
+    assert.strictEqual(clamped.baseUrl, 'http://box:8080/v1', 'base URL is trimmed');
+    assert.strictEqual(clamped.model, 'stored-model', 'an empty model selection keeps the stored model');
+    const kept = pe.peNormalizeSettings({ timeoutSeconds: 'ninety', replaceMode: 'bogus' }, current);
+    assert.strictEqual(kept.timeoutSeconds, current.timeoutSeconds, 'an unparseable number keeps the current value');
+    assert.strictEqual(kept.replaceMode, current.replaceMode, 'an unknown mode keeps the current mode');
+});
+
+test('Contract: the settings adapter accepts every contract replace mode', async () => {
+    const { pe } = await boot({});
+    for (const mode of CONTRACT.settings.replaceMode!.enum!) {
+        const result = pe.peAdaptSettingsResult({ success: true, settings: { replaceMode: mode } });
+        assert.ok(result.ok, `adapter accepts '${mode}'`);
+        assert.strictEqual((result as { ok: true; settings: Partial<PESettings> }).settings.replaceMode, mode, `adapter passes '${mode}' through`);
+    }
+});
+
+test('A recovered settings store is surfaced via console.warn', async () => {
+    const { calls } = await boot({ routeResponses: { GetPromptEnhanceSettings: { success: true, settings: {}, recovered: true } } });
+    assert.ok(calls.consoleWarns.some((line) => line.includes('corrupt')), 'the recovered flag produces a warning');
+    assert.deepStrictEqual(calls.consoleErrors, [], 'recovery is a warning, not an error');
+});
+
+test('Boot is clean: one settings load, zero console errors', async () => {
+    const { calls } = await boot({});
+    assert.deepStrictEqual(calls.consoleErrors, [], 'no console.error output');
+    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'GetPromptEnhanceSettings').length, 1, 'exactly one settings load');
+});
+
+test('Settings load failure keeps the defaults, is logged, and Enhance still works', async () => {
+    const { calls, pe } = await boot({ prompt: 'a cat', routeErrors: { GetPromptEnhanceSettings: new Error('store on fire') } });
+    assert.ok(calls.consoleErrors.some((line) => line.includes('Failed to load settings')), 'the failure is logged');
+    assert.strictEqual(pe.settings.effective().baseUrl, 'http://localhost:11434', 'defaults stay in effect');
+    await pe.genTab.handleEnhance();
+    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 1, 'Enhance still sends');
+    assert.strictEqual(calls.showError.length, 0, 'no error banner');
+});
+
+test('Loading settings merges server values over defaults and rejects wrongly typed values', async () => {
+    const { pe } = await boot({
+        routeResponses: { GetPromptEnhanceSettings: { success: true, settings: { model: 'mock-enhancer', timeoutSeconds: 'ninety', replaceMode: 'append' } } }
     });
-    await win.PromptEnhance.loadSettings!();
-    assert.strictEqual(win.PromptEnhance.settings!.model, 'mock-enhancer', 'server value overrides the default');
-    assert.strictEqual(win.PromptEnhance.settings!.timeoutSeconds, 60, 'a wrongly typed server value is rejected by the adapter, keeping the default');
-    assert.strictEqual(win.PromptEnhance.settings!.replaceMode, 'append', 'valid enum value is accepted');
-    assert.strictEqual(win.PromptEnhance.settings!.baseUrl, 'http://localhost:11434', 'unsent keys keep their defaults');
+    const effective = pe.settings.effective();
+    assert.strictEqual(effective.model, 'mock-enhancer', 'server value overrides the default');
+    assert.strictEqual(effective.timeoutSeconds, 60, 'a wrongly typed value keeps the default');
+    assert.strictEqual(effective.replaceMode, 'append', 'a valid enum value is accepted');
+    assert.strictEqual(effective.baseUrl, 'http://localhost:11434', 'unsent keys keep their defaults');
 });
 
-test('Save settings round-trips the panel values and surfaces Saved status', async () => {
-    const { win, doc, calls } = await boot({
-        routeResponses: {
-            SavePromptEnhanceSettings: { success: true, settings: { model: 'saved-model' } },
-            PromptEnhanceListModels: { success: true, models: [{ id: 'saved-model' }] }
-        }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    (doc.getElementById('pe_base_url') as HTMLInputElement).value = '  http://box:8080/v1  ';
-    const ok = await win.peSaveSettings();
-    assert.strictEqual(ok, true, 'save resolves true on success');
-    const saves = calls.genericRequest.filter((c) => c.route === 'SavePromptEnhanceSettings');
-    assert.strictEqual(saves.length, 1, 'one save request sent');
-    assert.strictEqual(saves[0]!.payload.settings!.baseUrl, 'http://box:8080/v1', 'panel value is trimmed and sent');
-    assert.strictEqual(win.PromptEnhance.settings!.model, 'saved-model', 'server-confirmed settings are merged back');
-    assert.strictEqual(doc.getElementById('pe_settings_status')!.textContent, 'Saved.', 'status line reports the save');
+test('Nothing mounts and no API call is made until SwarmUI signals the session is ready', async () => {
+    const { win, doc, calls, fireSessionReady } = await boot({ holdSessionReady: true });
+    assert.strictEqual(win.sessionReadyCallbacks.length, 1, 'startup registers exactly one session-ready hook');
+    assert.strictEqual(doc.getElementById('pe_button_bar'), null, 'no bar before the session is ready');
+    assert.strictEqual(calls.genericRequest.length, 0, 'no API call before the session is ready');
+    await fireSessionReady();
+    assert.ok(doc.getElementById('pe_button_bar'), 'the session-ready hook mounts the bar');
+    assert.deepStrictEqual(calls.genericRequest.map((c) => c.route), ['GetPromptEnhanceSettings'], 'the session-ready hook loads settings');
+    await fireSessionReady();
+    assert.strictEqual(doc.querySelectorAll('#pe_button_bar').length, 1, 'a repeated signal does not remount');
+    assert.strictEqual(calls.genericRequest.length, 1, 'a repeated signal does not reload settings');
 });
 
-test('Save failure surfaces the classified error in the status line and resolves false', async () => {
-    const { win, doc } = await boot({
-        routeResponses: {
-            SavePromptEnhanceSettings: { success: false, error: 'Timeout (seconds) must be a whole number' },
-            PromptEnhanceListModels: { success: true, models: [{ id: 'm' }] }
-        }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    const ok = await win.peSaveSettings();
-    assert.strictEqual(ok, false, 'save resolves false on rejection');
-    const status = doc.getElementById('pe_settings_status')!;
-    assert.ok(status.textContent!.startsWith('Save failed: '), 'failure status prefix present');
-    assert.ok(status.textContent!.includes('Timeout (seconds)'), 'server validation text is surfaced verbatim');
-    assert.ok(status.className.includes('error'), 'status line carries the error class');
+test('Every change to the extension UI height asks SwarmUI to re-offset the prompt region', async () => {
+    let relayouts = 0;
+    const { doc, pe } = await boot({ prompt: 'a cat', settings: { replaceMode: 'preview' }, genTabLayout: { altPromptSizeHandle: () => { relayouts++; } } });
+    assert.ok(relayouts > 0, 'mounting calls genTabLayout.altPromptSizeHandle()');
+    const expectRelayout = async (action: string, run: () => void | Promise<void>) => {
+        const before = relayouts;
+        await run();
+        assert.ok(relayouts > before, `${action} calls genTabLayout.altPromptSizeHandle()`);
+    };
+    await expectRelayout('opening the preview', () => pe.genTab.handleEnhance());
+    assert.strictEqual(doc.getElementById('pe_preview')!.style.display, 'block', 'the preview is open');
+    await expectRelayout('applying the preview', () => doc.getElementById('pe_preview_apply')!.click());
+    await expectRelayout('restoring', () => doc.getElementById('pe_restore_btn')!.click());
 });
 
-test('Reset restores defaults, repopulates the panel, and refreshes the model list', async () => {
-    const { win, doc, calls } = await boot({
-        settings: { baseUrl: 'http://elsewhere:1', model: 'weird' },
-        routeResponses: {
-            ResetPromptEnhanceSettings: { success: true, settings: { baseUrl: 'http://localhost:11434', model: '' } },
-            PromptEnhanceListModels: { success: true, models: [{ id: 'mock-enhancer' }] }
-        }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    const ok = await win.peResetSettings();
-    assert.strictEqual(ok, true, 'reset resolves true on success');
-    assert.strictEqual((doc.getElementById('pe_base_url') as HTMLInputElement).value, 'http://localhost:11434', 'panel repopulated with defaults');
-    assert.strictEqual(win.PromptEnhance.settings!.model, '', 'server-confirmed defaults are merged back');
-    const refreshes = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceListModels');
-    assert.ok(refreshes.length >= 1, 'reset triggers a model-list refresh');
-    const status = doc.getElementById('pe_settings_status')!;
-    assert.ok(!status.className.includes('error'), 'the reset flow ends without an error state (the chained model refresh cleared the transient status)');
-});
-
-test('fetchModels populates REAL options and preselects the configured model', async () => {
-    const { win, doc } = await boot({
-        routeResponses: {
-            PromptEnhanceListModels: { success: true, models: [{ id: 'a' }, { id: 'mock-enhancer', name: 'Mock Enhancer' }, { id: '' }, 'garbage'] }
-        }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    win.PromptEnhance.settings!.model = 'mock-enhancer';
-    await win.peFetchModels();
-    const select = doc.getElementById('pe_model_select') as HTMLSelectElement;
-    const values = [...select.options].map((o) => o.value);
-    assert.deepStrictEqual(values, ['', 'a', 'mock-enhancer'], 'placeholder plus each valid id; empty-id and non-object entries dropped by the adapter');
-    assert.strictEqual(select.options[2]!.text, 'Mock Enhancer', 'display name comes from the wire name when present');
-    assert.strictEqual(select.value, 'mock-enhancer', 'configured model is preselected');
-});
-
-test('fetchModels failure shows a disabled explanatory option and an error status', async () => {
-    const { win, doc } = await boot({
-        routeResponses: {
-            PromptEnhanceListModels: { success: false, error: 'Cannot reach the LLM backend.' }
-        }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    await win.peFetchModels();
-    const select = doc.getElementById('pe_model_select') as HTMLSelectElement;
-    assert.strictEqual(select.options.length, 1, 'exactly one explanatory option');
-    assert.strictEqual(select.options[0]!.disabled, true, 'the explanatory option is not selectable');
-    assert.ok(select.options[0]!.text.includes('No models'), 'the option explains the empty list');
-    const status = doc.getElementById('pe_settings_status')!;
-    assert.strictEqual(status.textContent, 'Cannot reach the LLM backend.', 'classified backend error is surfaced verbatim');
-});
-
-test('fetchModels transport error (onError path) is classified, not swallowed', async () => {
-    const { win, doc } = await boot({
-        routeErrors: { PromptEnhanceListModels: new Error('socket hang up') }
-    });
-    win.PromptEnhance.openSettingsPanel!();
-    await win.peFetchModels();
-    const select = doc.getElementById('pe_model_select') as HTMLSelectElement;
-    assert.strictEqual(select.options[0]!.disabled, true, 'error placeholder option is disabled');
-    assert.ok(select.options[0]!.text.includes('Error loading models'), 'transport failure is explained in the dropdown');
-    assert.strictEqual(doc.getElementById('pe_settings_status')!.textContent, 'socket hang up', 'transport error text reaches the status line');
-});
-
-test('peEnsureButtons retries until the Generate-tab region appears (async SwarmUI render)', async () => {
-    const { win, doc } = await boot({ pageHtml: BARE_HTML });
-    win.peEnsureButtons();
-    assert.strictEqual(doc.getElementById('pe_button_bar'), null, 'no bar while the region is absent');
-    const region = doc.createElement('div');
-    region.className = 'alt_prompt_region';
-    region.innerHTML = '<textarea id="alt_prompt_textbox"></textarea>';
-    doc.body.appendChild(region);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.ok(doc.getElementById('pe_button_bar'), 'the retry loop injects the bar once the region exists');
-});
-
-test('peShowError still reaches the user when the host showError itself throws', async () => {
-    const { win, calls } = await boot({ throwingShowError: true });
-    win.peShowError('the backend is on fire');
+test('An error still reaches the user when the host showError itself throws', async () => {
+    const { calls, pe } = await boot({ throwingShowError: true });
+    pe.genTab.showError('the backend is on fire');
     assert.strictEqual(calls.alerts.length, 1, 'the alert fallback fires');
-    assert.strictEqual(calls.alerts[0], 'the backend is on fire', 'the original message survives the fallback');
-    assert.ok(calls.consoleErrors.some((line) => line.includes('host showError failed')), 'the host failure is logged, not swallowed');
+    assert.strictEqual(calls.alerts[0], 'the backend is on fire', 'the message survives the fallback');
+    assert.ok(calls.consoleErrors.some((line) => line.includes('host showError failed')), 'the host failure is logged');
 });
 
 (async () => {
@@ -422,12 +460,12 @@ test('peShowError still reaches the user when the host showError itself throws',
     for (const t of tests) {
         try {
             await t.fn();
-            console.log('  ok   ' + t.name);
+            console.log(`  ok   ${t.name}`);
         } catch (err) {
             failed++;
-            console.log('  FAIL ' + t.name + '\n       ' + (err instanceof Error && err.stack ? err.stack : String(err)));
+            console.log(`  FAIL ${t.name}\n       ${err instanceof Error && err.stack ? err.stack : String(err)}`);
         }
     }
-    console.log('\n' + (failed === 0 ? 'PASS' : 'FAIL') + ' — ' + (tests.length - failed) + '/' + tests.length + ' frontend tests passed');
+    console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} — ${tests.length - failed}/${tests.length} frontend tests passed`);
     process.exit(failed === 0 ? 0 : 1);
 })();

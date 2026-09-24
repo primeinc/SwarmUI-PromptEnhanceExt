@@ -1,0 +1,11 @@
+{
+  "inputs": "b6069c8229607f4939e37f6c94fc3a4630b2e00cf910b12b626d87b867ccf58e",
+  "swarmuiPin": "96a4c3d14a31776bab5e3300301e078c15875f22",
+  "shots": {
+    "api-key-row.png": "5d478ed4d0570c0ec959022a36fc61a8f5f18759bee789286b00765536c31260",
+    "enhance-button.png": "bc22563599baa891b62c43faec6f30c1f127a680df49f3a70944effe225657e5",
+    "enhance-preview.png": "c707ec55229845253cb5ddee2e8742ccb2d2c2db44e905232261909738a9e5d2",
+    "enhance-restore.png": "0adf9d935bb60d7f9fa3c238f619de8ddaf16df046ccc28b65f7e068ef3bde9a",
+    "settings-modal.png": "3fac85826f28e6391c687cf5b8491d6536f07802b8b38a4aa71a8b3b0dd6deb9"
+  }
+}
