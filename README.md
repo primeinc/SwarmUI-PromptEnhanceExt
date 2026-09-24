@@ -152,21 +152,25 @@ Two layouts build and test identically; the C# project picks one automatically (
 
 ### Gates
 
-`just check` is the gate to run before committing. It runs, in order:
+`just check` is the gate to run before committing. It runs the frontend parity check first, since it rewrites `Assets/*.js`, then everything else in parallel. The three C# runner paths share one build:
 
 ```sh
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
+# then, in parallel:
 npm run lint                    # Biome, recommended preset; Frontend keeps SwarmUI style (let, ==)
 npm run shots:check             # ./screenshots must be what a green browser run of the current UI produced
 npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
-dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
+dotnet build Tests/PromptEnhance.Tests.csproj -c Debug   # one build for the three C# runner paths, which then run in parallel:
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
+dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, stand-alone MTP test executable
 ```
+
+Parallel output is interleaved; `just` names the recipe that failed on its last line.
 
 The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it.
 
-CI (`.github/workflows/gates.yml`) runs these gates on every push, the C# suite in both layouts, plus a `browser` job: the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
+CI (`.github/workflows/gates.yml`) runs two jobs on every push that touches more than `docs/` or `LICENSE`. The `gates` job runs `just check`, type-checks the browser specs, and runs the C# suite through all three runner paths again in the host layout. The `browser` job runs the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
 
 ### Running the real host
 

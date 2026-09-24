@@ -1,9 +1,14 @@
 name: gates
 
+# Two jobs, because GitHub bills each job rounded up to a whole minute and every job pays its own
+# setup: `gates` runs every non-browser gate in one job, `browser` runs the host boot and the
+# Playwright specs. docs/ and LICENSE feed no gate, so changes limited to them start no run.
 on:
   push:
     branches: ['**']
+    paths-ignore: ['docs/**', 'LICENSE']
   pull_request:
+    paths-ignore: ['docs/**', 'LICENSE']
 
 permissions:
   contents: read
@@ -17,83 +22,76 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
+  # Frontend parity, lint, shots:check, the jsdom suite, and the C# suite through all three runner
+  # paths in both layouts: standalone (./ext with ./ext/vendor/SwarmUI, via `just check`, the same
+  # recipe as local runs) and host (./host/SwarmUI/src/Extensions/PromptEnhance). The host checkout
+  # sits outside ./ext because the extension csproj compiles every .cs file under its directory.
+  gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
-      # The jsdom suite loads the host's util.js from the vendored layout.
+        with:
+          path: ext
       - uses: actions/checkout@v4
         with:
           repository: mcmonkeyprojects/SwarmUI
           ref: 96a4c3d14a31776bab5e3300301e078c15875f22
-          path: vendor/SwarmUI
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: npm ci
-      - run: npm run check:frontend-parity
-      - run: npm run lint
-      - run: npm run shots:check
-      - run: npm run test:frontend
-
-  csharp:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
+          path: ext/vendor/SwarmUI
       - uses: actions/checkout@v4
         with:
           repository: mcmonkeyprojects/SwarmUI
           ref: 96a4c3d14a31776bab5e3300301e078c15875f22
-          path: SwarmUI
+          path: host/SwarmUI
       - uses: actions/checkout@v4
         with:
-          path: SwarmUI/src/Extensions/PromptEnhance
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - run: dotnet build SwarmUI/src/SwarmUI.csproj -c Release -o SwarmUI/src/bin/live_release
-      - run: dotnet test SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug
-      - run: dotnet test SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true
-      - run: dotnet run --project SwarmUI/src/Extensions/PromptEnhance/Tests/PromptEnhance.Tests.csproj -c Debug
-
-  csharp-vendored:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: mcmonkeyprojects/SwarmUI
-          ref: 96a4c3d14a31776bab5e3300301e078c15875f22
-          path: vendor/SwarmUI
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - run: dotnet test Tests/PromptEnhance.Tests.csproj -c Debug
-      - run: dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true
-      - run: dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug
-
-  # The browser gates and the live host boot, through the same just recipes as local runs. Pixel
-  # baselines (./screenshots) are rendered on the maintainer's desktop and fonts differ on Linux,
-  # so they are skipped here; shots:check in the frontend job holds them to the current inputs.
-  browser:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - uses: actions/checkout@v4
+          path: host/SwarmUI/src/Extensions/PromptEnhance
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: ext/package-lock.json
       - uses: taiki-e/install-action@v2
         with:
           tool: just
       - run: npm ci
-      - run: npm run ui:install -- --with-deps
-      - run: just vendor-ci-test
-      - run: npm run build:frontend
+        working-directory: ext
+      - run: just check
+        working-directory: ext
+      # Type-checks the Playwright specs here, off the browser job's critical path.
       - run: npm run typecheck:ui
+        working-directory: ext
+      # The host layout compiles the extension against the host's own Release build, as SwarmUI's launch scripts produce it.
+      - run: dotnet build host/SwarmUI/src/SwarmUI.csproj -c Release -o host/SwarmUI/src/bin/live_release
+      - run: just -f host/SwarmUI/src/Extensions/PromptEnhance/justfile backend-tests
+
+  # The live host boot and every browser gate, through the same just recipes as local runs. Pixel
+  # baselines (./screenshots) are rendered on the maintainer's desktop and fonts differ on Linux,
+  # so they are skipped here; shots:check in the gates job holds them to the current inputs. The
+  # host serves the extension copy vendor-dev makes from the committed Assets/*.js, which the
+  # parity gate proves equal to the tsc output, so no frontend build runs here.
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: npm ci
+      # Headless runs use chromium-headless-shell only; the full Chromium build is never launched here.
+      - run: npm run ui:install -- --with-deps --only-shell
+      - run: just vendor-ci-test
       - run: npm run test:ui:ci
