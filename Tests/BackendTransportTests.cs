@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -146,11 +147,42 @@ public class BackendTransportTests
         Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
+    /// <summary>localhost resolves to ::1 and 127.0.0.1. Windows retries a refused SYN for about 2s per address, so trying them one after the other outlasts the 3s probe, whose timeout counts as reachable, and every call pays the full wait again.</summary>
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_DeadLocalhost_IsCachedUnreachable()
+    {
+        using Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        int port = ((IPEndPoint)reserved.LocalEndPoint!).Port;
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://localhost:{port}\"}}");
+        JObject first = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.Equal("server_unavailable", first["error_id"]!.Value<string>());
+        Stopwatch again = Stopwatch.StartNew();
+        JObject second = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        again.Stop();
+        Xunit.Assert.Equal("server_unavailable", second["error_id"]!.Value<string>());
+        Xunit.Assert.True(again.ElapsedMilliseconds < 500, $"second call took {again.ElapsedMilliseconds} ms; the probe did not cache the dead backend");
+    }
+
+    /// <summary>A backend listening on 127.0.0.1 only, reached as localhost: the ::1 attempt is refused while the IPv4 one connects, and the request goes through without waiting out the refusal.</summary>
+    [Xunit.Fact]
+    public async Task ExecuteListModels_LocalhostWithIPv4OnlyBackend_ConnectsWithoutWaitingOnRefusedAddress()
+    {
+        using MockHttpServer server = new(200, "OK", ModelsBody);
+        Stopwatch elapsed = Stopwatch.StartNew();
+        JObject r = await WebAPI.BackendClient.ExecuteListModels($"http://localhost:{server.Port}", 30);
+        elapsed.Stop();
+        Xunit.Assert.True(r["success"]!.Value<bool>(), r.ToString());
+        Xunit.Assert.Single(server.RequestHeads);
+        Xunit.Assert.True(elapsed.ElapsedMilliseconds < 1000, $"took {elapsed.ElapsedMilliseconds} ms; the connect waited on a refused address");
+    }
+
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_BackendOnAPortThatWasDeadMomentsAgo_IsReachable()
     {
         // Bound but not listening: connections are refused, and no other process can take the port before the server does.
-        Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         int port = ((IPEndPoint)reserved.LocalEndPoint!).Port;
         SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
