@@ -149,14 +149,15 @@ public class BackendTransportTests
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_BackendOnAPortThatWasDeadMomentsAgo_IsReachable()
     {
-        TcpListener probe = new(IPAddress.Loopback, 0);
-        probe.Start();
-        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
+        // Bound but not listening: connections are refused, and no other process can take the port before the server does.
+        Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        int port = ((IPEndPoint)reserved.LocalEndPoint!).Port;
         SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
         session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://127.0.0.1:{port}\"}}");
         JObject dead = await WebAPI.BackendClient.PromptEnhanceListModels(session);
         Xunit.Assert.Equal("server_unavailable", dead["error_id"]!.Value<string>());
+        reserved.Dispose();
         using MockHttpServer live = new(200, "OK", ModelsBody, port: port);
         JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
         Xunit.Assert.True(r["success"]!.Value<bool>(), r.ToString());

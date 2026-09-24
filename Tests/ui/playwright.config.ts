@@ -25,8 +25,9 @@ export default defineConfig({
     reporter: [['list'], ['./green-reporter.ts']],
     /**
      * The README screenshots are the toHaveScreenshot baselines. No pixel may differ beyond the
-     * per-pixel color threshold, so a single changed character fails. They are taken on the default
-     * ports, whose values the settings modal shows, so other ports skip the comparison.
+     * per-pixel color threshold, so a single changed character is a difference: a plain run fails,
+     * and --update-snapshots=changed (`just ui-test`) rewrites the baseline. They are taken on the
+     * default ports, whose values the settings modal shows, so other ports skip the comparison.
      */
     snapshotPathTemplate: '../../screenshots/{arg}{ext}',
     ignoreSnapshots: !usesDefaultPorts,

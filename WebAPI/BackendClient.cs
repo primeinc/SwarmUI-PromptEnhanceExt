@@ -53,7 +53,7 @@ public class BackendClient
     /// <summary>Probe results keyed by normalized Base URL.</summary>
     private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
 
-    /// <summary>Drops the cached probe result for <paramref name="normalizedBase"/>, for when a backend is known to have started or stopped there.</summary>
+    /// <summary>Drops the cached probe result for <paramref name="normalizedBase"/>, for when a backend is known to have started there.</summary>
     internal static void ForgetReachability(string normalizedBase)
     {
         ReachabilityCache.Remove(normalizedBase);

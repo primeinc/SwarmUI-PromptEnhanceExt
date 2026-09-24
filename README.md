@@ -190,7 +190,7 @@ The browser gates cover:
 
 ### README screenshots
 
-The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. Every browser run on the default ports compares them pixel by pixel, and one differing pixel fails, so a single changed character fails. Other ports skip the comparison, since the settings modal shows the port values. `just ui-test-force` runs with `--update-snapshots=changed`, so Playwright rewrites a PNG only when the picture really changed. An unchanged UI leaves `screenshots/` untouched.
+The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. On the default ports a browser run compares them pixel by pixel with no differing pixel allowed, so a single changed character is a difference. Other ports skip the comparison, since the settings modal shows the port values. A plain `npm run test:ui` fails on a difference. `just ui-test` and `just ui-test-force` run with `--update-snapshots=changed`, which rewrites the differing PNG instead of failing, so a visual change shows up in `git diff screenshots/` for review. An unchanged UI leaves `screenshots/` untouched.
 
 `screenshots/manifest.json` records:
 - each screenshot's sha256
