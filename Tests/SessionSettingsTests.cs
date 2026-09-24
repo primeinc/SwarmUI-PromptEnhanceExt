@@ -297,6 +297,6 @@ public class SessionSettingsTests
     {
         Xunit.Assert.NotNull(error);
         Xunit.Assert.False(error!["success"]!.Value<bool>());
-        Xunit.Assert.Equal("generic", error["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("generic", error["error_id"]!.Value<string>());
     }
 }

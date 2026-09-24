@@ -1,10 +1,12 @@
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Utils;
+using SwarmUI.WebAPI;
 
 namespace PromptEnhance.WebAPI;
 
 /// <summary>Settings persistence for the eight-key settings schema, stored per-user through User.GetGenericData/SaveGenericData. Reads merge stored values over <see cref="Defaults"/> key-by-key.</summary>
+[API.APIClass("PromptEnhance extension: the per-user settings (backend Base URL, model, prompt, sampling, and apply mode).")]
 public class SessionSettings
 {
     private const string SETTINGS_KEY = "promptenhance";
@@ -74,6 +76,21 @@ public class SessionSettings
     }
 
     /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
+    [API.APIDescription("Returns the current user's PromptEnhance settings: stored values merged over the defaults. The backend API key is not part of the settings and is never returned.",
+        """
+            "success": true,
+            "settings": {
+                "baseUrl": "http://localhost:11434",
+                "model": "",
+                "timeoutSeconds": 60,
+                "systemPrompt": "You are a prompt enhancer ...",
+                "temperature": 0.7,
+                "maxTokens": 1024,
+                "sendSelectedImage": false,
+                "replaceMode": "preview" // or "append", "replace_with_restore"
+            },
+            "recovered": true // only when the stored settings were corrupt and defaults were applied
+        """)]
     public static Task<JObject> GetPromptEnhanceSettings(Session session)
     {
         try
@@ -105,11 +122,19 @@ public class SessionSettings
     }
 
     /// <summary>API route: validates then persists a partial settings object. Merge order is defaults ← previously stored ← incoming, per known key; unknown keys are dropped.</summary>
-    public static Task<JObject> SavePromptEnhanceSettings(JObject rawInput, Session session)
+    [API.APIDescription("Validates and saves a partial PromptEnhance settings object for the current user. Keys left out keep their stored value; unknown keys are ignored. Nothing is saved if any key is invalid.",
+        """
+            "success": true,
+            "settings": { ... } // the full saved settings, as GetPromptEnhanceSettings returns them
+            // on failure: "success": false, "error": "Base URL must be a valid http(s) URL ...", "error_id": "generic"
+        """)]
+    public static Task<JObject> SavePromptEnhanceSettings(
+        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl (absolute http(s) URL; a trailing /v1 is accepted), model (string, empty for none), timeoutSeconds (integer 1-3600), systemPrompt (string), temperature (number 0-2), maxTokens (integer >= 1), sendSelectedImage (boolean), replaceMode ('preview', 'append', or 'replace_with_restore').")] JObject raw,
+        Session session)
     {
         try
         {
-            JObject incoming = rawInput?["settings"] as JObject;
+            JObject incoming = raw?["settings"] as JObject;
             if (incoming == null)
             {
                 return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No settings object provided."));
@@ -271,6 +296,11 @@ public class SessionSettings
     }
 
     /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/> and returns them.</summary>
+    [API.APIDescription("Resets the current user's PromptEnhance settings to the defaults. The backend API key is separate and is not touched.",
+        """
+            "success": true,
+            "settings": { ... } // the defaults, as GetPromptEnhanceSettings returns them
+        """)]
     public static Task<JObject> ResetPromptEnhanceSettings(Session session)
     {
         try

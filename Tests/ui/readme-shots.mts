@@ -1,14 +1,17 @@
 /**
- * Freshness gate for the committed README screenshots in ./screenshots.
+ * Freshness record for the browser gates and the committed README screenshots in ./screenshots.
  *
- *   clean  empties Tests/ui/shots/readme before a browser run, so only shots from that run survive
- *   write  copies Tests/ui/shots/readme into ./screenshots and records screenshots/manifest.json
- *   check  fails unless the manifest matches both the committed PNGs and the current inputs
+ *   clean    empties Tests/ui/shots/readme before a browser run, so only shots from that run survive
+ *   write    copies Tests/ui/shots/readme into ./screenshots and records screenshots/manifest.json
+ *   check    fails unless the manifest matches the committed PNGs, the README, and the current inputs
+ *   current  exits 0 when a green browser run already covers the current inputs, else 1 with the reason
  *
- * `just readme-shots` runs clean, the full browser gate, then write: a shot reaches ./screenshots
- * only from a green run. Hashes are git blob ids (`git hash-object`), which apply the repo's
- * line-ending normalization, so a CRLF checkout and an LF checkout agree. File mtimes are not
- * used: git does not preserve them.
+ * `just ui-test` runs `current` and stops there when nothing changed; otherwise it runs clean, the
+ * full browser gate, then write. A shot reaches ./screenshots only from a green run and nothing
+ * edits the manifest by hand. Shots are deterministic (no clocks, no timestamps), so an unchanged
+ * UI rewrites byte-identical files. Hashes are git blob ids (`git hash-object`), which apply the
+ * repo's line-ending normalization, so CRLF and LF checkouts agree. File mtimes are not used: git
+ * does not preserve them.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,8 +23,16 @@ const runDir = path.join(repo, 'Tests', 'ui', 'shots', 'readme');
 const committedDir = path.join(repo, 'screenshots');
 const manifestPath = path.join(committedDir, 'manifest.json');
 
-/** Everything that changes what the screenshots show: extension UI source and styles, the specs that stage the shots, the contract defaults, and the SwarmUI pin. */
-const inputRoots = ['Frontend', 'Assets', 'Tests/ui', 'contracts'];
+/**
+ * Everything a browser run depends on besides the SwarmUI pin: the served frontend and styles, the
+ * server-side extension (routes, validation, error text), the contract, the specs and fake backends,
+ * the dev host seed, and the npm lockfile that fixes the Playwright and Chromium versions.
+ */
+const inputPaths = [
+    'Frontend', 'Assets', 'WebAPI', 'contracts', 'Tests/ui',
+    'BackendSchema.cs', 'PromptEnhanceExtension.cs', 'PromptEnhance.csproj',
+    'scripts/vendor-dev-settings.fds', 'package.json', 'package-lock.json'
+];
 const inputExcludes = ['Tests/ui/shots/', 'Tests/ui/test-results/', 'Tests/ui/readme-shots.mts'];
 
 interface Manifest {
@@ -59,12 +70,12 @@ function swarmuiPin(): string {
 
 /** One digest over every input file (tracked and untracked, gitignored excluded) plus the pin. */
 function inputsDigest(): string {
-    const listed = git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...inputRoots]).split('\0');
+    const listed = git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...inputPaths]).split('\0');
     const files = [...new Set(listed)]
         .filter((file) => file !== '' && !inputExcludes.some((prefix) => file.startsWith(prefix)) && fs.existsSync(path.join(repo, file)))
         .sort();
     if (files.length === 0) {
-        throw new Error(`no input files found under ${inputRoots.join(', ')}`);
+        throw new Error(`no input files found under ${inputPaths.join(', ')}`);
     }
     const ids = blobIds(files);
     const hash = createHash('sha256');
@@ -79,6 +90,41 @@ function pngsIn(dir: string): string[] {
     return fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith('.png')).sort() : [];
 }
 
+/** Every reason the committed screenshots and manifest do not describe a green run of the current inputs; empty when they do. */
+function problems(): string[] {
+    if (!fs.existsSync(manifestPath)) {
+        return [`${path.relative(repo, manifestPath)} is missing`];
+    }
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest;
+    const found: string[] = [];
+    const recorded = Object.keys(manifest.shots).sort();
+    const present = pngsIn(committedDir);
+    for (const shot of present.filter((name) => !recorded.includes(name))) {
+        found.push(`screenshots/${shot} is not in the manifest`);
+    }
+    for (const shot of recorded.filter((name) => !present.includes(name))) {
+        found.push(`screenshots/${shot} is in the manifest but missing`);
+    }
+    const common = recorded.filter((name) => present.includes(name));
+    const ids = blobIds(common.map((shot) => `screenshots/${shot}`));
+    for (const [index, shot] of common.entries()) {
+        if (manifest.shots[shot] !== ids[index]) {
+            found.push(`screenshots/${shot} differs from the image the last green run produced`);
+        }
+    }
+    if (manifest.swarmuiPin !== swarmuiPin()) {
+        found.push(`the last green run was on SwarmUI ${manifest.swarmuiPin}, the pin is ${swarmuiPin()}`);
+    }
+    else if (manifest.inputs !== inputsDigest()) {
+        found.push(`files the browser gates depend on changed since the last green run (${inputPaths.join(', ')})`);
+    }
+    const readme = fs.readFileSync(path.join(repo, 'README.md'), 'utf8');
+    for (const shot of recorded.filter((name) => !readme.includes(`screenshots/${name}`))) {
+        found.push(`README.md does not show screenshots/${shot}`);
+    }
+    return found;
+}
+
 function clean(): void {
     fs.rmSync(runDir, { recursive: true, force: true });
 }
@@ -86,7 +132,7 @@ function clean(): void {
 function write(): void {
     const shots = pngsIn(runDir);
     if (shots.length === 0) {
-        throw new Error(`no screenshots in ${runDir}; run \`just readme-shots\``);
+        throw new Error(`no screenshots in ${runDir}; run \`just ui-test\``);
     }
     for (const stale of pngsIn(committedDir)) {
         fs.rmSync(path.join(committedDir, stale));
@@ -102,44 +148,24 @@ function write(): void {
 }
 
 function check(): void {
-    const fix = 'Run `just readme-shots` and commit ./screenshots.';
-    if (!fs.existsSync(manifestPath)) {
-        throw new Error(`${path.relative(repo, manifestPath)} is missing. ${fix}`);
+    const found = problems();
+    if (found.length > 0) {
+        throw new Error(`README screenshots are stale:\n  - ${found.join('\n  - ')}\nRun \`just ui-test\` and commit ./screenshots.`);
     }
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest;
-    const problems: string[] = [];
-    const recorded = Object.keys(manifest.shots).sort();
-    const present = pngsIn(committedDir);
-    for (const shot of present.filter((name) => !recorded.includes(name))) {
-        problems.push(`screenshots/${shot} is not in the manifest`);
-    }
-    for (const shot of recorded.filter((name) => !present.includes(name))) {
-        problems.push(`screenshots/${shot} is in the manifest but missing`);
-    }
-    const common = recorded.filter((name) => present.includes(name));
-    const ids = blobIds(common.map((shot) => `screenshots/${shot}`));
-    common.forEach((shot, index) => {
-        if (manifest.shots[shot] !== ids[index]) {
-            problems.push(`screenshots/${shot} differs from the image the last green run produced`);
-        }
-    });
-    if (manifest.swarmuiPin !== swarmuiPin()) {
-        problems.push(`screenshots were taken on SwarmUI ${manifest.swarmuiPin}, the pin is ${swarmuiPin()}`);
-    }
-    else if (manifest.inputs !== inputsDigest()) {
-        problems.push('the extension UI, its styles, the UI specs, or the contract changed since the screenshots were taken');
-    }
-    const readme = fs.readFileSync(path.join(repo, 'README.md'), 'utf8');
-    for (const shot of recorded.filter((name) => !readme.includes(`screenshots/${name}`))) {
-        problems.push(`README.md does not show screenshots/${shot}`);
-    }
-    if (problems.length > 0) {
-        throw new Error(`README screenshots are stale:\n  - ${problems.join('\n  - ')}\n${fix}`);
-    }
-    console.log(`[readme-shots] ${recorded.length} screenshots are current (SwarmUI ${manifest.swarmuiPin})`);
+    console.log(`[readme-shots] screenshots are current (SwarmUI ${swarmuiPin()})`);
 }
 
-const modes: Record<string, () => void> = { clean, write, check };
+function current(): void {
+    const found = problems();
+    if (found.length > 0) {
+        console.log(`[readme-shots] running the browser gates:\n  - ${found.join('\n  - ')}`);
+        process.exitCode = 1;
+        return;
+    }
+    console.log('[readme-shots] nothing the browser gates depend on changed since the last green run; skipping. `just ui-test-force` runs them anyway.');
+}
+
+const modes: Record<string, () => void> = { clean, write, check, current };
 const mode = process.argv[2] ?? '';
 const run = modes[mode];
 if (!run) {

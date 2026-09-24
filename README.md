@@ -135,7 +135,7 @@ Two layouts build and test identically; the C# project picks one automatically (
 | Path | Contents |
 | --- | --- |
 | `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, and API routes. |
-| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, and the API key registration (`UpstreamApiKey.cs`). |
+| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, and the API key registration (`UpstreamApiKey.cs`). Every route carries `[API.APIDescription]`/`[API.APIParameter]` for SwarmUI's API doc generator, and failures return SwarmUI's `{ "error", "error_id" }` envelope with `error_id` from `errorCategories` in the contract. |
 | `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`); every global is `pe`-prefixed or a `promptEnhance*` singleton. |
 | `Assets/*.js` | The exact `tsc` output of `Frontend/`, committed because SwarmUI serves it. Never edit by hand; `npm run build:frontend` regenerates it. |
 | `Assets/promptenhance.css` | Extension styles, using only color tokens every SwarmUI theme defines. |
@@ -170,8 +170,7 @@ These recipes need the standalone workspace:
 | `just vendor-dev` | Seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the vendored host's `src/Extensions/`. |
 | `just vendor-ci-test` | Boots the real host with SwarmUI's `--ci_test` mode; any logged error fails with a nonzero exit. |
 | `just ui-install` | Downloads the Chromium build Playwright drives (once). |
-| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backends on ports 7897 (no key) and 7896 (key required), and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. |
-| `just readme-shots` | Clears the previous run's README shots, runs `just ui-test`, then copies the new shots into `screenshots/` and records `screenshots/manifest.json`. |
+| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backends on ports 7897 (no key) and 7896 (key required), and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. When every test passes, it also rewrites the README screenshots in `screenshots/` and `screenshots/manifest.json`. |
 
 The browser gates cover:
 - the prompt-box geometry: the extension bar and preview never push the prompt boxes under the bottom panel
@@ -191,7 +190,7 @@ A test declared with `test.fail` pins a known defect. It passes while the defect
 - any of those inputs or the pin changed since the screenshots were taken
 - the README does not show a recorded screenshot
 
-The fix is always `just readme-shots`, then commit `screenshots/`. Screenshots reach `screenshots/` only through that recipe, and only after every browser gate passes.
+The fix is always `just ui-test`, then commit `screenshots/`. Nothing edits the manifest by hand: `just ui-test` clears the previous run's shots first, and writes `screenshots/` and the manifest only after every browser gate passes. The shots are deterministic, so rerunning on an unchanged UI leaves `screenshots/` byte-identical.
 
 ## License
 

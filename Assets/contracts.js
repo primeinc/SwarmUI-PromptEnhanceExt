@@ -52,13 +52,6 @@ function peErrorText(err) {
     }
     return 'request error';
 }
-/** Reads the API envelope's error text, if the response carries one. */
-function peEnvelopeError(data, fallback) {
-    if (peIsRecord(data) && typeof data.error == 'string' && data.error) {
-        return data.error;
-    }
-    return fallback;
-}
 /** Narrows an arbitrary value to a replace mode, or null. */
 function peReplaceModeOf(value) {
     for (let mode of PE_REPLACE_MODES) {
@@ -90,10 +83,15 @@ function peNormalizeSettings(raw, current) {
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
     };
 }
+/**
+ * The adapters below see only responses SwarmUI's genericRequest passed to the success callback;
+ * any response carrying `error` goes to the error callback instead (site.js). A failed result here
+ * therefore means a success response of the wrong shape.
+ */
 /** Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult. Accepts only `success: true` with an object `settings` payload; each key is copied only when it matches the schema type. */
 function peAdaptSettingsResult(data) {
     if (!peIsRecord(data) || data.success !== true || !peIsRecord(data.settings)) {
-        return { ok: false, error: peEnvelopeError(data, 'Settings request failed.') };
+        return { ok: false, error: 'The server returned settings in an unexpected shape.' };
     }
     let raw = data.settings;
     let settings = {};
@@ -127,7 +125,7 @@ function peAdaptSettingsResult(data) {
 /** Adapter: PromptEnhanceListModels response -> PEModelsResult. An empty model list is classified as a failure. */
 function peAdaptModelsResult(data) {
     if (!peIsRecord(data) || data.success !== true || !Array.isArray(data.models)) {
-        return { ok: false, error: peEnvelopeError(data, 'Could not fetch models.') };
+        return { ok: false, error: 'The server returned the model list in an unexpected shape.' };
     }
     let models = [];
     for (let entry of data.models) {
@@ -136,7 +134,7 @@ function peAdaptModelsResult(data) {
         }
     }
     if (models.length == 0) {
-        return { ok: false, error: peEnvelopeError(data, 'Could not fetch models.') };
+        return { ok: false, error: 'The backend lists no models.' };
     }
     return { ok: true, models };
 }
@@ -145,5 +143,5 @@ function peAdaptEnhanceResult(data) {
     if (peIsRecord(data) && data.success === true && typeof data.response == 'string' && data.response.length > 0) {
         return { ok: true, response: data.response };
     }
-    return { ok: false, error: peEnvelopeError(data, 'enhancement failed.') };
+    return { ok: false, error: 'The server returned the enhancement in an unexpected shape.' };
 }

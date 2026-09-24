@@ -43,7 +43,7 @@ public class BackendClientTests
         JObject result = await WebAPI.BackendClient.PromptEnhanceRun(rawInput, null!);
 
         Xunit.Assert.False(result["success"]!.Value<bool>());
-        Xunit.Assert.Equal("generic", result["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("generic", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains("No prompt text", result["error"]!.Value<string>());
     }
 }

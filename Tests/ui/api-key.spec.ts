@@ -19,12 +19,14 @@ async function saveKeyInUserTab(page: Page, key: string, shot?: string): Promise
     await page.locator('#userinfotabbutton').click();
     const row = page.locator(`tr[data-key="${keyType}"]`);
     await expect(row).toContainText('PromptEnhance LLM Server');
+    if (shot) {
+        // Taken before saving: once saved, the status cell shows the save time, which would change the image on every run.
+        await expect(page.locator('#promptenhance_key_status')).toHaveText('not set');
+        await row.screenshot({ path: path.join(readmeShotDir, `${shot}.png`), animations: 'disabled' });
+    }
     await page.locator('#promptenhance_api_key').fill(key);
     await page.locator('#promptenhance_key_submit').click();
     await expect(page.locator('#promptenhance_key_status')).toContainText('last updated');
-    if (shot) {
-        await row.screenshot({ path: path.join(readmeShotDir, `${shot}.png`), animations: 'disabled' });
-    }
     await openTab(page, 'text2imagetabbutton');
 }
 

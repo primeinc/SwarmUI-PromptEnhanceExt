@@ -63,14 +63,14 @@ vendor-sync:
 vendor-dev: vendor-sync
     if (-not (Test-Path 'vendor/SwarmUI/Data')) { New-Item -ItemType Directory -Force 'vendor/SwarmUI/Data' | Out-Null }
     if (-not (Test-Path 'vendor/SwarmUI/Data/Settings.fds')) { Copy-Item 'scripts/vendor-dev-settings.fds' 'vendor/SwarmUI/Data/Settings.fds' }
-    robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking shots test-results /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
+    robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking shots test-results .claude /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
 
 # Make the vendored host a runnable dev install (see the [windows] variant)
 [unix]
 vendor-dev: vendor-sync
     mkdir -p vendor/SwarmUI/Data
     if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
-    rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking --exclude shots --exclude test-results ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
+    rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking --exclude shots --exclude test-results --exclude .claude ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
 
 # Bump the SwarmUI pin in every mirror in one recipe (justfile + gates.yml), resync vendor, rerun
 # the gates including the live host boot. Not transactional: a partial failure leaves the mirrors
@@ -114,18 +114,25 @@ vendor-ci-test port='7899': vendor-host-build
 ui-install:
     npm run ui:install
 
-# Browser gates against the real vendored host: rebuilds the frontend and host first so the copy served is current. Screenshots land in Tests/ui/shots.
-ui-test: frontend-build vendor-host-build
+# Browser gates, skipped when nothing they depend on changed since the last green run (screenshots/manifest.json)
+[windows]
+ui-test:
+    node Tests/ui/readme-shots.mts current; if ($LASTEXITCODE -ne 0) { just ui-test-force; exit $LASTEXITCODE }
+
+# Browser gates, skipped when nothing they depend on changed since the last green run (screenshots/manifest.json)
+[unix]
+ui-test:
+    node Tests/ui/readme-shots.mts current || just ui-test-force
+
+# Browser gates against the real vendored host, always run: rebuilds the frontend and host first so the copy served is current. Screenshots land in Tests/ui/shots; a fully green run also rewrites the README screenshots and their manifest in ./screenshots.
+ui-test-force: readme-shots-clean frontend-build vendor-host-build
     npm run typecheck:ui
     npm run test:ui
+    npm run shots:write
 
 # Empty the per-run README screenshot folder so only the next run's shots can be committed
 readme-shots-clean:
     npm run shots:clean
-
-# Refresh the committed README screenshots (./screenshots + manifest) from a fresh, fully green browser-gate run
-readme-shots: readme-shots-clean ui-test
-    npm run shots:write
 
 # Fail if ./screenshots is not what a green run of the current UI and SwarmUI pin produced
 readme-shots-check:

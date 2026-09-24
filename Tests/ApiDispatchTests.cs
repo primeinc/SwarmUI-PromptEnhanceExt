@@ -15,7 +15,7 @@ public class ApiDispatchTests
         JObject result = await call.Call(null!, null!, null!, input);
 
         Xunit.Assert.False(result["success"]!.Value<bool>());
-        Xunit.Assert.Equal("generic", result["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("generic", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains("No prompt text", result["error"]!.Value<string>());
     }
 }

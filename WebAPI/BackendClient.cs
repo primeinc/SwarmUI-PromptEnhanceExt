@@ -13,6 +13,7 @@ using PromptEnhance.WebAPI.Models;
 namespace PromptEnhance.WebAPI;
 
 /// <summary>Backend transport for `GET /v1/models` and `POST /v1/chat/completions`, plus the reachability probe. Every failure returns a classified <see cref="PromptEnhanceErrorCategory"/> response.</summary>
+[API.APIClass("PromptEnhance extension: calls to the user's configured OpenAI-compatible backend (model list and prompt enhancement).")]
 public class BackendClient
 {
     private static readonly HttpClient HttpClient = CreateHttpClient();
@@ -123,6 +124,15 @@ public class BackendClient
     }
 
     /// <summary>API route: lists the backend's models.</summary>
+    [API.APIDescription("Lists the models the configured backend offers, from its `GET /v1/models`. Sends the user's PromptEnhance API key, if set.",
+        """
+            "success": true,
+            "models": [
+                { "id": "llama3.2", "name": "llama3.2" }
+            ]
+            // on failure: "success": false, "error": "Cannot reach the LLM backend ...", "error_id": "server_unavailable"
+            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, invalid_response_shape, http_error, authentication, generic
+        """)]
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
@@ -179,9 +189,18 @@ public class BackendClient
     }
 
     /// <summary>API route: the enhance call.</summary>
-    public static async Task<JObject> PromptEnhanceRun(JObject rawInput, Session session)
+    [API.APIDescription("Sends a prompt, and optionally images, to the configured backend's `POST /v1/chat/completions` with the user's system prompt and sampling settings, and returns the rewritten prompt. Sends the user's PromptEnhance API key, if set.",
+        """
+            "success": true,
+            "response": "A weathered stone lighthouse on a rocky headland at dusk, ..."
+            // on failure: "success": false, "error": "The request to the LLM backend timed out ...", "error_id": "timeout"
+            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, generic
+        """)]
+    public static async Task<JObject> PromptEnhanceRun(
+        [API.APIParameter("The request body: `prompt` (string, required, the text to enhance) and optional `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: 'image/png' or similar } sent to the model as images.")] JObject raw,
+        Session session)
     {
-        string userText = rawInput?["prompt"]?.ToString();
+        string userText = raw?["prompt"]?.ToString();
         if (string.IsNullOrWhiteSpace(userText))
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No prompt text was provided to enhance.");
@@ -208,7 +227,7 @@ public class BackendClient
         List<BackendSchema.MediaContent> media;
         try
         {
-            media = ParseMedia(rawInput?["media"] as JArray);
+            media = ParseMedia(raw?["media"] as JArray);
         }
         catch (ArgumentException ex)
         {

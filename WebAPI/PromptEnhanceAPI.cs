@@ -22,8 +22,7 @@ public static class PromptEnhancePermissions
         PermissionDefault.POWERUSERS, PromptEnhancePermGroup, PermSafetyLevel.POWERFUL));
 }
 
-/// <summary>Route registration plus the response-envelope and wire-deserialization helpers shared by the API surface.</summary>
-[API.APIClass("Prompt-enhancement routes for the PromptEnhance extension")]
+/// <summary>Route registration plus the response-envelope and wire-deserialization helpers shared by the API surface. The routes themselves are declared, and documented, on <see cref="BackendClient"/> and <see cref="SessionSettings"/>.</summary>
 public class PromptEnhanceAPI
 {
     /// <summary>Registers the five routes. The bool is SwarmUI's IsUserUpdate flag: true for run/save/reset, false for list models and get settings.</summary>
@@ -62,13 +61,13 @@ public class PromptEnhanceAPI
         ["settings"] = settings
     };
 
-    /// <summary>The single error envelope: success=false plus the stable errorCategory code and error text.</summary>
-    public static JObject CreateErrorResponse(PromptEnhanceErrorCategory category, string detail = null) => new()
+    /// <summary>The single error envelope: SwarmUI's `error` + stable `error_id` (<see cref="Utilities.ErrorObj"/>), plus success=false.</summary>
+    public static JObject CreateErrorResponse(PromptEnhanceErrorCategory category, string detail = null)
     {
-        ["success"] = false,
-        ["errorCategory"] = ErrorHandler.CategoryCode(category),
-        ["error"] = ErrorHandler.Format(category, detail)
-    };
+        JObject response = Utilities.ErrorObj(ErrorHandler.Format(category, detail), ErrorHandler.CategoryCode(category));
+        response["success"] = false;
+        return response;
+    }
 
     /// <summary>Adapter: `/v1/models` body -> model list. Returns null when the body is not the expected envelope; entries without an id are dropped.</summary>
     public static List<ModelData> DeserializeModels(string json)

@@ -95,7 +95,7 @@ public class ApiKeyTests
         using MockHttpServer server = new(200, "OK", ChatBody);
         JObject r = await WebAPI.BackendClient.PromptEnhanceRun(new JObject { ["prompt"] = "a cat" }, SessionFor(server, "sk-bad\nInjected: yes"));
         Xunit.Assert.False(r["success"]!.Value<bool>());
-        Xunit.Assert.Equal("authentication", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
         Xunit.Assert.DoesNotContain("sk-bad", r.ToString());
         Xunit.Assert.DoesNotContain(server.RequestHeads, head => head.StartsWith("POST", StringComparison.Ordinal));
     }
@@ -114,7 +114,7 @@ public class ApiKeyTests
     {
         using MockHttpServer server = new(401, "Unauthorized", "{\"error\":{\"message\":\"missing key\"}}");
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 30);
-        Xunit.Assert.Equal("authentication", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
         Xunit.Assert.Contains("User → API Keys", r["error"]!.Value<string>());
     }
 }

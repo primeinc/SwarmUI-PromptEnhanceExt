@@ -29,7 +29,7 @@ public class BackendTransportTests
         using MockHttpServer server = new(404, "Not Found", "{\"error\":{\"message\":\"no such route\"}}");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
         Xunit.Assert.False(r["success"]!.Value<bool>());
-        Xunit.Assert.Equal("model_missing", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("model_missing", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -37,7 +37,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(500, "Internal Server Error", "boom");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
-        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -45,7 +45,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", "this is not json");
         JObject r = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
-        Xunit.Assert.Equal("invalid_response_shape", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("invalid_response_shape", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -62,7 +62,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(401, "Unauthorized", "{\"error\":{\"message\":\"missing key\"}}");
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 30);
-        Xunit.Assert.Equal("authentication", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -70,7 +70,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", "{ not valid json");
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 30);
-        Xunit.Assert.Equal("invalid_response_shape", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("invalid_response_shape", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -79,7 +79,7 @@ public class BackendTransportTests
         using MockHttpServer server = new(400, "Bad Request", "{\"error\":{\"message\":\"this model does not support image input\"}}");
         List<BackendSchema.MediaContent> media = [new() { Type = "base64", Data = "QUJD", MediaType = "image/png" }];
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "describe", media, 0.7, 1024, 30);
-        Xunit.Assert.Equal("unsupported_image", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("unsupported_image", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -88,7 +88,7 @@ public class BackendTransportTests
         using MockHttpServer server = new(400, "Bad Request", "{\"error\":{\"message\":\"maximum context length exceeded\"}}");
         List<BackendSchema.MediaContent> media = [new() { Type = "base64", Data = "QUJD", MediaType = "image/png" }];
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "describe", media, 0.7, 1024, 30);
-        Xunit.Assert.Equal("http_error", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("http_error", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -96,7 +96,7 @@ public class BackendTransportTests
     {
         using MockHttpServer server = new(200, "OK", ChatBody, delayMs: 3000);
         JObject r = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "hi", [], 0.7, 1024, 1);
-        Xunit.Assert.Equal("timeout", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("timeout", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -107,7 +107,7 @@ public class BackendTransportTests
         int deadPort = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         JObject r = await WebAPI.BackendClient.ExecuteChat($"http://127.0.0.1:{deadPort}", "m", "sys", "hi", [], 0.7, 1024, 5);
-        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]
@@ -121,7 +121,7 @@ public class BackendTransportTests
         session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://127.0.0.1:{deadPort}\"}}");
         JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
         Xunit.Assert.False(r["success"]!.Value<bool>());
-        Xunit.Assert.Equal("server_unavailable", r["errorCategory"]!.Value<string>());
+        Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
     [Xunit.Fact]

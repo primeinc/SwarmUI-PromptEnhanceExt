@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import * as path from 'node:path';
 
-/** Cropped screenshots for the README; `just readme-shots` copies them into ./screenshots. */
+/** Cropped screenshots for the README; `just ui-test` copies them into ./screenshots. */
 export const readmeShotDir = path.join(__dirname, 'shots', 'readme');
 
 /** Screenshots the Generate-tab prompt region (the extension bar, preview, and prompt boxes) for the README. */
