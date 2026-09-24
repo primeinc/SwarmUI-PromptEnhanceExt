@@ -1,17 +1,20 @@
 /**
  * Freshness record for the browser gates and the committed README screenshots in ./screenshots.
  *
- *   clean    empties Tests/ui/shots/readme before a browser run, so only shots from that run survive
- *   write    copies Tests/ui/shots/readme into ./screenshots and records screenshots/manifest.json
+ *   clean    starts a run record: the input digest the coming browser run starts from
+ *   write    records screenshots/manifest.json for the run that just finished
  *   check    fails unless the manifest matches the committed PNGs, the README, and the current inputs
  *   current  exits 0 when a green browser run already covers the current inputs, else 1 with the reason
  *
- * `just ui-test` runs `current` and stops there when nothing changed; otherwise it runs clean, the
- * full browser gate, then write. A shot reaches ./screenshots only from a green run and nothing
- * edits the manifest by hand. Shots are deterministic (no clocks, no timestamps), so an unchanged
- * UI rewrites byte-identical files. Hashes are git blob ids (`git hash-object`), which apply the
- * repo's line-ending normalization, so CRLF and LF checkouts agree. File mtimes are not used: git
- * does not preserve them.
+ * The README screenshots are Playwright toHaveScreenshot baselines (playwright.config.ts): a run
+ * compares them pixel-wise with a small tolerance, and `just ui-test-force` runs with
+ * --update-snapshots=changed, so Playwright rewrites a baseline only when the picture really
+ * changed. `just ui-test` runs `current` and stops there when nothing changed; otherwise it runs
+ * clean, the full browser gate, then write. `write` refuses unless that same run passed in full
+ * (the pass record from green-reporter.ts), the inputs did not change during it, the default ports
+ * were used, and the vendored host is clean at the pin. Hashes are sha256 over file content, with
+ * CRLF read as LF in text files, so they do not depend on checkout settings. Committed-file mtimes
+ * are not used: git does not preserve them.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -19,7 +22,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const repo = path.resolve(import.meta.dirname, '..', '..');
-const runDir = path.join(repo, 'Tests', 'ui', 'shots', 'readme');
+const runDir = path.join(repo, 'Tests', 'ui', 'shots', 'run');
 const committedDir = path.join(repo, 'screenshots');
 const manifestPath = path.join(committedDir, 'manifest.json');
 
@@ -35,23 +38,51 @@ const inputPaths = [
 ];
 const inputExcludes = ['Tests/ui/shots/', 'Tests/ui/test-results/', 'Tests/ui/readme-shots.mts'];
 
+/** Written by `clean` when a run starts. */
+const runRecordPath = path.join(runDir, 'run.json');
+
+/** Written by green-reporter.ts when that run passed in full. */
+const passedRecordPath = path.join(runDir, 'passed.json');
+
+/** The ports the screenshots are taken with; the settings-modal shot shows the fake backend's. */
+const defaultPorts: Record<string, string> = { ui: '7898', fakeBackend: '7897', fakeKeyedBackend: '7896' };
+
 interface Manifest {
     inputs: string;
     swarmuiPin: string;
     shots: Record<string, string>;
 }
 
-function git(args: string[], input?: string): string {
-    return execFileSync('git', args, { cwd: repo, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+interface RunRecord {
+    inputs: string;
+    startedAt: number;
 }
 
-/** Blob ids for repo-relative paths, in the given order. */
-function blobIds(paths: string[]): string[] {
-    const ids = git(['hash-object', '--stdin-paths'], `${paths.join('\n')}\n`).split('\n').filter((line) => line !== '');
-    if (ids.length !== paths.length) {
-        throw new Error(`git hash-object returned ${ids.length} ids for ${paths.length} paths`);
+interface PassedRecord {
+    status: string;
+    ports: Record<string, string | null>;
+}
+
+function git(args: string[], cwd = repo): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+}
+
+/** sha256 of a file's content. Text (no NUL byte) is read with CRLF as LF, so checkouts with and without CRLF conversion agree. */
+function contentHash(file: string): string {
+    const bytes = fs.readFileSync(path.join(repo, file));
+    const hash = createHash('sha256');
+    if (bytes.includes(0)) {
+        hash.update(bytes);
     }
-    return ids;
+    else {
+        hash.update(bytes.toString('utf8').replaceAll('\r\n', '\n'));
+    }
+    return hash.digest('hex');
+}
+
+/** Content hashes for repo-relative paths, in the given order. */
+function blobIds(paths: string[]): string[] {
+    return paths.map(contentHash);
 }
 
 /** The `swarmui_pin` string literal from the justfile. */
@@ -127,24 +158,60 @@ function problems(): string[] {
 
 function clean(): void {
     fs.rmSync(runDir, { recursive: true, force: true });
+    fs.mkdirSync(runDir, { recursive: true });
+    const record: RunRecord = { inputs: inputsDigest(), startedAt: Date.now() };
+    fs.writeFileSync(runRecordPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+/** Every reason the run that just finished may not certify ./screenshots; empty when it may. */
+function writeRefusals(shots: string[]): string[] {
+    const refusals: string[] = [];
+    if (!fs.existsSync(runRecordPath)) {
+        return ['no run record: the shots did not come from `just ui-test`'];
+    }
+    const run = JSON.parse(fs.readFileSync(runRecordPath, 'utf8')) as RunRecord;
+    if (!fs.existsSync(passedRecordPath)) {
+        refusals.push('no pass record: the browser run failed, was filtered, or never ran');
+    }
+    else {
+        const passed = JSON.parse(fs.readFileSync(passedRecordPath, 'utf8')) as PassedRecord;
+        for (const [name, port] of Object.entries(passed.ports)) {
+            if (port !== null && port !== defaultPorts[name]) {
+                refusals.push(`the run used ${name} port ${port}; screenshots are taken on the default ports`);
+            }
+        }
+    }
+    if (run.inputs !== inputsDigest()) {
+        refusals.push('inputs changed while the browser gates ran');
+    }
+    if (shots.length === 0) {
+        refusals.push('./screenshots holds no screenshots');
+    }
+    const vendor = path.join(repo, 'vendor', 'SwarmUI');
+    if (!fs.existsSync(path.join(vendor, '.git'))) {
+        refusals.push('vendor/SwarmUI is missing');
+    }
+    else {
+        if (git(['rev-parse', 'HEAD'], vendor).trim() !== swarmuiPin()) {
+            refusals.push(`vendor/SwarmUI is not at the pin ${swarmuiPin()}`);
+        }
+        if (git(['status', '--porcelain'], vendor).trim() !== '') {
+            refusals.push('vendor/SwarmUI has local changes');
+        }
+    }
+    return refusals;
 }
 
 function write(): void {
-    const shots = pngsIn(runDir);
-    if (shots.length === 0) {
-        throw new Error(`no screenshots in ${runDir}; run \`just ui-test\``);
-    }
-    for (const stale of pngsIn(committedDir)) {
-        fs.rmSync(path.join(committedDir, stale));
-    }
-    fs.mkdirSync(committedDir, { recursive: true });
-    for (const shot of shots) {
-        fs.copyFileSync(path.join(runDir, shot), path.join(committedDir, shot));
+    const shots = pngsIn(committedDir);
+    const refusals = writeRefusals(shots);
+    if (refusals.length > 0) {
+        throw new Error(`refusing to update ./screenshots:\n  - ${refusals.join('\n  - ')}\nRun \`just ui-test-force\`.`);
     }
     const ids = blobIds(shots.map((shot) => `screenshots/${shot}`));
     const manifest: Manifest = { inputs: inputsDigest(), swarmuiPin: swarmuiPin(), shots: Object.fromEntries(shots.map((shot, index) => [shot, ids[index]!])) };
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    console.log(`[readme-shots] wrote ${shots.length} screenshots and ${path.relative(repo, manifestPath)}`);
+    console.log(`[readme-shots] certified ${shots.length} screenshots in ${path.relative(repo, manifestPath)}`);
 }
 
 function check(): void {

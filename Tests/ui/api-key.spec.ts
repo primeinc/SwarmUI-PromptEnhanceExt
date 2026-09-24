@@ -1,6 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import * as path from 'node:path';
-import { callRoute, fakeBackendKey, fakeKeyedBackendUrl, readmeShotDir, useSettings } from './host';
+import { callRoute, fakeBackendKey, fakeKeyedBackendUrl, useSettings } from './host';
 
 /** Key type of the extension's row in SwarmUI's User → API Keys table (contracts/pe-contract.json apiKeyType). */
 const keyType = 'promptenhance_api';
@@ -22,7 +21,7 @@ async function saveKeyInUserTab(page: Page, key: string, shot?: string): Promise
     if (shot) {
         // Taken before saving: once saved, the status cell shows the save time, which would change the image on every run.
         await expect(page.locator('#promptenhance_key_status')).toHaveText('not set');
-        await row.screenshot({ path: path.join(readmeShotDir, `${shot}.png`), animations: 'disabled' });
+        await expect(row).toHaveScreenshot(`${shot}.png`);
     }
     await page.locator('#promptenhance_api_key').fill(key);
     await page.locator('#promptenhance_key_submit').click();
@@ -42,14 +41,10 @@ test.afterEach(async ({ page }) => {
 });
 
 test('a server that requires a key refuses Enhance until the key is saved in User → API Keys, then answers; the key never reaches the browser', async ({ page }) => {
-    const bodies: string[] = [];
-    page.on('response', async (response) => {
-        try {
-            bodies.push(await response.text());
-        }
-        catch {
-            // Redirects and aborted requests have no body.
-        }
+    const pendingBodies: Promise<string | null>[] = [];
+    page.on('response', (response) => {
+        // Redirects and aborted requests have no body.
+        pendingBodies.push(response.text().catch(() => null));
     });
     await useSettings(page, { baseUrl: fakeKeyedBackendUrl, model: 'fake-enhancer', replaceMode: 'preview' });
     await enhance(page, 'a quiet harbor');
@@ -63,6 +58,7 @@ test('a server that requires a key refuses Enhance until the key is saved in Use
 
     const settings = await callRoute(page, 'GetPromptEnhanceSettings', {});
     expect(JSON.stringify(settings)).not.toContain(fakeBackendKey);
+    const bodies = (await Promise.all(pendingBodies)).filter((body): body is string => body !== null);
     expect(bodies.length, 'control: responses were captured').toBeGreaterThan(5);
     expect(bodies.filter((body) => body.includes(fakeBackendKey)), 'no response the browser received contains the key').toEqual([]);
 });

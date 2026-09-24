@@ -22,7 +22,7 @@ let PE_API_KEY_TYPE = 'promptenhance_api';
 let PE_LIMITS = {
     timeoutSeconds: { min: 1, max: 3600 },
     temperature: { min: 0, max: 2 },
-    maxTokens: { min: 1 }
+    maxTokens: { min: 1, max: 2147483647 }
 };
 /** Settings defaults, mirrored from contracts/pe-contract.json. */
 let PE_DEFAULT_SETTINGS = {
@@ -78,7 +78,7 @@ function peNormalizeSettings(raw, current) {
         timeoutSeconds: clamp(Math.round(num(raw.timeoutSeconds, current.timeoutSeconds)), PE_LIMITS.timeoutSeconds.min, PE_LIMITS.timeoutSeconds.max),
         systemPrompt: raw.systemPrompt ?? current.systemPrompt,
         temperature: clamp(num(raw.temperature, current.temperature), PE_LIMITS.temperature.min, PE_LIMITS.temperature.max),
-        maxTokens: Math.max(PE_LIMITS.maxTokens.min, Math.round(num(raw.maxTokens, current.maxTokens))),
+        maxTokens: clamp(Math.round(num(raw.maxTokens, current.maxTokens)), PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max),
         sendSelectedImage: raw.sendSelectedImage ?? current.sendSelectedImage,
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
     };

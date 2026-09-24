@@ -15,7 +15,9 @@
     "lint": "biome lint --reporter=github --max-diagnostics=500",
     "shots:clean": "node Tests/ui/readme-shots.mts clean",
     "shots:write": "node Tests/ui/readme-shots.mts write",
-    "shots:check": "node Tests/ui/readme-shots.mts check"
+    "shots:check": "node Tests/ui/readme-shots.mts check",
+    "test:ui:update": "playwright test -c Tests/ui --update-snapshots=changed",
+    "test:ui:ci": "playwright test -c Tests/ui --ignore-snapshots"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

@@ -194,7 +194,7 @@ public class SessionSettings
             }
             if (BackendClient.NormalizeBaseUrl(baseUrl.Value<string>()) == null)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a valid http(s) URL (for example http://localhost:11434).");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Base URL must be a valid http(s) URL with no query, fragment, or user name and password (for example http://localhost:11434).");
             }
         }
         JToken model = incoming["model"];

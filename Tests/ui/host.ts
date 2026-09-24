@@ -1,12 +1,8 @@
 import { expect, type Page } from '@playwright/test';
-import * as path from 'node:path';
 
-/** Cropped screenshots for the README; `just ui-test` copies them into ./screenshots. */
-export const readmeShotDir = path.join(__dirname, 'shots', 'readme');
-
-/** Screenshots the Generate-tab prompt region (the extension bar, preview, and prompt boxes) for the README. */
+/** Checks the Generate-tab prompt region (the extension bar, preview, and prompt boxes) against its README screenshot, screenshots/<name>.png. */
 export async function shootPromptRegion(page: Page, name: string): Promise<void> {
-    await page.locator('#alt_prompt_region').screenshot({ path: path.join(readmeShotDir, `${name}.png`), animations: 'disabled' });
+    await expect(page.locator('#alt_prompt_region')).toHaveScreenshot(`${name}.png`);
 }
 
 /** The OpenAI-compatible fake backend started by playwright.config.ts. */

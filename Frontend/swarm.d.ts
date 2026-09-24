@@ -85,7 +85,7 @@ interface PERoutes {
 interface PELimits {
     readonly timeoutSeconds: { readonly min: number; readonly max: number };
     readonly temperature: { readonly min: number; readonly max: number };
-    readonly maxTokens: { readonly min: number };
+    readonly maxTokens: { readonly min: number; readonly max: number };
 }
 
 /** SwarmUI Generate-tab layout singleton (js/genpage/gentab/layout.js). */
@@ -107,6 +107,9 @@ declare function showError(message: string): void;
 
 /** Fires `input` and `change` for a programmatically edited control (site.js). */
 declare function triggerChangeFor(elem: HTMLElement): void;
+
+/** Reads an image src (including SwarmUI `inputs/` paths and Civitai URLs) into a data URL; the callback receives null on failure (util.js). */
+declare function imageToData(src: string, callback: (dataUrl: string | null) => void, resize256?: boolean): void;
 
 /** Returns the element with the id, throwing when it is absent (util.js). */
 declare function getRequiredElementById(id: string): HTMLElement;

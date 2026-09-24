@@ -55,11 +55,12 @@ Errors from **Enhance Prompt** appear in SwarmUI's error banner. Errors in the s
 | --- | --- |
 | `Type a prompt to enhance first.` | The prompt box is empty. |
 | `Cannot reach the LLM backend…` | The server is not running, or the Base URL is wrong. |
-| The model list shows **Error loading models** | Same as above; the settings modal could not list models from the Base URL. The stored model is kept until you pick another. |
+| The model list shows **Error loading models** | The model-list request failed. The red status line at the bottom of the modal gives the reason: an unreachable server, a missing or wrong API key, or a Base URL that is not an OpenAI-compatible server. The stored model is kept until you pick another. |
+| `The backend answered 307 redirecting to …` | The server redirected the request. PromptEnhance does not follow redirects; set the Base URL to the address in the message. |
 | `No usable model…` | No model is selected, or the server does not have it loaded. |
 | `Base URL must be a valid http(s) URL…` | Save rejected the Base URL; use an absolute URL such as `http://localhost:11434`. |
 | `The LLM backend rejected the request as unauthorized…` | The server needs an API key, or the saved one is wrong. Set it under **User → API Keys**; see [API keys](#api-keys). The server's own reason follows under **Detail**. |
-| `The saved PromptEnhance API key contains spaces or line breaks…` | Re-enter the key under **User → API Keys**. It was not sent. |
+| `The saved PromptEnhance API key contains spaces, line breaks, or non-ASCII characters…` | Re-enter the key under **User → API Keys**; a stray character was likely pasted with it. It was not sent. |
 | `The selected model rejected the attached image…` | Use a vision model, or turn off **Send Selected Image**. |
 | `The request to the LLM backend timed out…` | Raise **Timeout (s)**, or use a faster model. |
 
@@ -84,7 +85,11 @@ This extension makes outbound web connections **only to the base URL configured 
 | `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. Carries the API key, if one is set. |
 | `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
 
-The reachability probe never carries the key. No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested. There is no telemetry, no update check, and no analytics of any kind.
+The reachability probe never carries the key. No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested:
+- Redirects are not followed; a 3xx answer is reported as an error naming its target.
+- A Base URL with a query (`?`), a fragment (`#`), or a user name and password is rejected when saved, since those would change the path or host the fixed `/v1/...` suffix reaches.
+
+There is no telemetry, no update check, and no analytics of any kind.
 
 ## Settings
 
@@ -159,7 +164,9 @@ dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTe
 dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
 ```
 
-The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it. CI (`.github/workflows/gates.yml`) runs the same gates on every push, in both layouts.
+The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it.
+
+CI (`.github/workflows/gates.yml`) runs these gates on every push, the C# suite in both layouts, plus a `browser` job: the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
 
 ### Running the real host
 
@@ -170,7 +177,8 @@ These recipes need the standalone workspace:
 | `just vendor-dev` | Seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the vendored host's `src/Extensions/`. |
 | `just vendor-ci-test` | Boots the real host with SwarmUI's `--ci_test` mode; any logged error fails with a nonzero exit. |
 | `just ui-install` | Downloads the Chromium build Playwright drives (once). |
-| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backends on ports 7897 (no key) and 7896 (key required), and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. When every test passes, it also rewrites the README screenshots in `screenshots/` and `screenshots/manifest.json`. |
+| `just ui-test` | The browser gates, skipped in under a second when nothing they depend on changed since the last green run. |
+| `just ui-test-force` | Always runs them: rebuilds the frontend and host, starts the host on port 7898 and the fake backends on ports 7897 (no key) and 7896 (key required), and runs `Tests/ui/*.spec.ts` in headless Chromium. Diagnostic screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. README screenshots that visibly changed are rewritten in `screenshots/`, and a fully green run records `screenshots/manifest.json`. |
 
 The browser gates cover:
 - the prompt-box geometry: the extension bar and preview never push the prompt boxes under the bottom panel
@@ -180,17 +188,21 @@ The browser gates cover:
 - API keys, against a fake server that answers only the right bearer key: refused without a key, refused with a wrong one, answered after the key is saved through the real User → API Keys row, and the key absent from every response the browser receives
 - the extension's borders and the modal in every registered theme
 
-A test declared with `test.fail` pins a known defect. It passes while the defect is present and fails the gate once the defect is fixed, so the fix commit flips it to `test`.
-
 ### README screenshots
 
-`screenshots/manifest.json` records each screenshot's git blob id, the SwarmUI pin, and a digest of everything the screenshots depend on: `Frontend/`, `Assets/`, `Tests/ui/`, and `contracts/`. `npm run shots:check` fails when any of the following holds:
-- a screenshot differs from the one recorded
-- a screenshot is added or missing
-- any of those inputs or the pin changed since the screenshots were taken
+The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. Every browser run compares them pixel by pixel, with a small tolerance for antialiasing. `just ui-test-force` runs with `--update-snapshots=changed`, so Playwright rewrites a PNG only when the picture really changed. An unchanged UI leaves `screenshots/` untouched.
+
+`screenshots/manifest.json` records:
+- each screenshot's sha256
+- the SwarmUI pin
+- a digest of everything the browser gates depend on: `Frontend/`, `Assets/`, `WebAPI/`, the root C# files and csproj, `contracts/`, `Tests/ui/`, the dev host seed, and the npm lockfile
+
+Only the gate writes it, and only after a run that passed in full, unfiltered, on the default ports, against a clean vendored host at the pin, with no input changing mid-run. `npm run shots:check` fails when:
+- a screenshot differs from the one recorded, or is added or missing
+- any input or the pin changed since that run
 - the README does not show a recorded screenshot
 
-The fix is always `just ui-test`, then commit `screenshots/`. Nothing edits the manifest by hand: `just ui-test` clears the previous run's shots first, and writes `screenshots/` and the manifest only after every browser gate passes. The shots are deterministic, so rerunning on an unchanged UI leaves `screenshots/` byte-identical.
+The fix is always `just ui-test`, then commit `screenshots/`. Removing a screenshot from the specs does not delete its PNG; delete it and the README reference in the same change.
 
 ## License
 

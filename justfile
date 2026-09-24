@@ -101,14 +101,16 @@ vendor-host-build: vendor-dev
     dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
 
 # Live host boot gate: SwarmUI's --ci_test boots the real host with this extension and exits nonzero on any logged error.
+[arg('port', pattern='[0-9]{1,5}')]
 [windows]
-vendor-ci-test port='7899': vendor-host-build
-    Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{ port }}; $code = $LASTEXITCODE; Pop-Location; exit $code
+vendor-ci-test $port='7899': vendor-host-build
+    Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port $env:port; $code = $LASTEXITCODE; Pop-Location; exit $code
 
 # Live host boot gate (see the [windows] variant for details)
+[arg('port', pattern='[0-9]{1,5}')]
 [unix]
-vendor-ci-test port='7899': vendor-host-build
-    cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{ port }}
+vendor-ci-test $port='7899': vendor-host-build
+    cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port "$port"
 
 # Install the Playwright browser the UI gates drive
 ui-install:
@@ -125,9 +127,9 @@ ui-test:
     node Tests/ui/readme-shots.mts current || just ui-test-force
 
 # Browser gates against the real vendored host, always run: rebuilds the frontend and host first so the copy served is current. Screenshots land in Tests/ui/shots; a fully green run also rewrites the README screenshots and their manifest in ./screenshots.
-ui-test-force: readme-shots-clean frontend-build vendor-host-build
+ui-test-force: frontend-build vendor-host-build readme-shots-clean
     npm run typecheck:ui
-    npm run test:ui
+    npm run test:ui:update
     npm run shots:write
 
 # Empty the per-run README screenshot folder so only the next run's shots can be committed

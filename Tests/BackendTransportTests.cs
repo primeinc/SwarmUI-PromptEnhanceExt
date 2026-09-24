@@ -91,6 +91,28 @@ public class BackendTransportTests
         Xunit.Assert.Equal("http_error", r["error_id"]!.Value<string>());
     }
 
+    [Xunit.Theory]
+    [Xunit.InlineData(301, "Moved Permanently")]
+    [Xunit.InlineData(302, "Found")]
+    [Xunit.InlineData(307, "Temporary Redirect")]
+    [Xunit.InlineData(308, "Permanent Redirect")]
+    public async Task Redirects_AreNotFollowed_AndReportedWithTheirTarget(int status, string reason)
+    {
+        using MockHttpServer elsewhere = new(200, "OK", ChatBody);
+        using MockHttpServer server = new(status, reason, "", location: $"{elsewhere.BaseUrl}/v1/chat/completions");
+        JObject chat = await WebAPI.BackendClient.ExecuteChat(server.BaseUrl, "m", "sys", "secret prompt", [], 0.7, 1024, 30);
+        JObject models = await WebAPI.BackendClient.ExecuteListModels(server.BaseUrl, 30);
+        Xunit.Assert.Empty(elsewhere.RequestHeads);
+        Xunit.Assert.Equal(2, server.RequestHeads.Count);
+        foreach (JObject r in new[] { chat, models })
+        {
+            Xunit.Assert.False(r["success"]!.Value<bool>());
+            Xunit.Assert.Equal("http_error", r["error_id"]!.Value<string>());
+            Xunit.Assert.Contains("redirect", r["error"]!.Value<string>(), StringComparison.OrdinalIgnoreCase);
+            Xunit.Assert.Contains(elsewhere.BaseUrl, r["error"]!.Value<string>());
+        }
+    }
+
     [Xunit.Fact]
     public async Task ExecuteChat_Timeout_ClassifiesTimeout()
     {
@@ -145,17 +167,19 @@ internal sealed class MockHttpServer : IDisposable
     private readonly string _reason;
     private readonly string _body;
     private readonly int _delayMs;
+    private readonly string? _location;
     private volatile bool _stop;
 
     /// <summary>The header block (request line plus headers) of every request received, in arrival order.</summary>
     public readonly ConcurrentQueue<string> RequestHeads = new();
 
-    public MockHttpServer(int status, string reason, string body, int delayMs = 0)
+    public MockHttpServer(int status, string reason, string body, int delayMs = 0, string? location = null)
     {
         _status = status;
         _reason = reason;
         _body = body;
         _delayMs = delayMs;
+        _location = location;
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         _ = Task.Run(AcceptLoopAsync);
@@ -231,6 +255,10 @@ internal sealed class MockHttpServer : IDisposable
                 StringBuilder head = new();
                 head.Append($"HTTP/1.1 {_status} {_reason}\r\n");
                 head.Append("Content-Type: application/json\r\n");
+                if (_location != null)
+                {
+                    head.Append($"Location: {_location}\r\n");
+                }
                 head.Append($"Content-Length: {bodyBytes.Length}\r\n");
                 head.Append("Connection: close\r\n\r\n");
                 byte[] headBytes = Encoding.ASCII.GetBytes(head.ToString());

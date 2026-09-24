@@ -205,7 +205,7 @@ class PromptEnhanceSettings {
             + field('pe_temperature', 'Temperature', 'number', `Sampling temperature, ${PE_LIMITS.temperature.min} to ${PE_LIMITS.temperature.max}.`,
                 makeNumberInput(null, 'pe_temperature', '', 'Temperature', '', defaults.temperature, PE_LIMITS.temperature.min, PE_LIMITS.temperature.max, 0.05))
             + field('pe_max_tokens', 'Max Tokens', 'number', 'Upper bound on the length of the enhanced prompt.',
-                makeNumberInput(null, 'pe_max_tokens', '', 'Max Tokens', '', defaults.maxTokens, PE_LIMITS.maxTokens.min, 1000000, 1))
+                makeNumberInput(null, 'pe_max_tokens', '', 'Max Tokens', '', defaults.maxTokens, PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max, 1))
             + field('pe_timeout', 'Timeout (s)', 'number', `Seconds to wait for the backend, ${PE_LIMITS.timeoutSeconds.min} to ${PE_LIMITS.timeoutSeconds.max}.`,
                 makeNumberInput(null, 'pe_timeout', '', 'Timeout (s)', '', defaults.timeoutSeconds, PE_LIMITS.timeoutSeconds.min, PE_LIMITS.timeoutSeconds.max, 1))
             + field('pe_replace_mode', 'Apply Mode', 'dropdown', 'What Enhance does with the result: show it for Apply/Cancel, append it below the prompt, or replace the prompt with a Restore button.',

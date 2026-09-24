@@ -7,12 +7,13 @@ public static class BackendSchema
     public class MediaContent
     {
         /// <summary>"base64" (data URI is synthesized here) or "url" (passed through as-is).</summary>
-        public string Type { get; set; }
+        public string Type;
 
-        public string Data { get; set; }
+        /// <summary>The base64 image bytes, or the URL for a "url" part.</summary>
+        public string Data;
 
         /// <summary>MIME type for base64 parts; defaults to image/jpeg when absent.</summary>
-        public string MediaType { get; set; }
+        public string MediaType;
     }
 
     /// <summary>Assembles the messages array: optional system message (omitted when blank), then a user message that is a plain string for text-only requests or an image_url+text content array when media is attached.</summary>

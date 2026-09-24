@@ -25,6 +25,11 @@ public class BackendClientTests
     [Xunit.InlineData("not a url")]
     [Xunit.InlineData("ftp://example.com")]
     [Xunit.InlineData("/relative/path")]
+    [Xunit.InlineData("http://169.254.169.254/latest/meta-data?x=")]
+    [Xunit.InlineData("http://internal/any/path#")]
+    [Xunit.InlineData("http://internal/any/path#frag")]
+    [Xunit.InlineData("http://user:pass@localhost:11434")]
+    [Xunit.InlineData("http://localhost:11434/v1?")]
     public void NormalizeBaseUrl_ReturnsNullForInvalid(string? input)
     {
         string? result = WebAPI.BackendClient.NormalizeBaseUrl(input!);

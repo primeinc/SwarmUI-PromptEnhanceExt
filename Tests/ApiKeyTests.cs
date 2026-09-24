@@ -89,11 +89,15 @@ public class ApiKeyTests
         Xunit.Assert.Equal(["Authorization: Bearer sk-list"], AuthorizationLines(server));
     }
 
-    [Xunit.Fact]
-    public async Task KeyThatCannotBeAHeaderValue_IsRejectedWithoutSendingOrEchoingIt()
+    [Xunit.Theory]
+    [Xunit.InlineData("sk-bad\nInjected: yes")]
+    [Xunit.InlineData("sk-bad key")]
+    [Xunit.InlineData("sk-badé")]
+    [Xunit.InlineData("sk-bad​")]
+    public async Task KeyThatCannotBeAHeaderValue_IsRejectedWithoutSendingOrEchoingIt(string key)
     {
         using MockHttpServer server = new(200, "OK", ChatBody);
-        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(new JObject { ["prompt"] = "a cat" }, SessionFor(server, "sk-bad\nInjected: yes"));
+        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(new JObject { ["prompt"] = "a cat" }, SessionFor(server, key));
         Xunit.Assert.False(r["success"]!.Value<bool>());
         Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
         Xunit.Assert.DoesNotContain("sk-bad", r.ToString());

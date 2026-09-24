@@ -73,3 +73,27 @@ jobs:
       - run: dotnet test Tests/PromptEnhance.Tests.csproj -c Debug
       - run: dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true
       - run: dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug
+
+  # The browser gates and the live host boot, through the same just recipes as local runs. Pixel
+  # baselines (./screenshots) are rendered on the maintainer's desktop and fonts differ on Linux,
+  # so they are skipped here; shots:check in the frontend job holds them to the current inputs.
+  browser:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: npm ci
+      - run: npm run ui:install -- --with-deps
+      - run: just vendor-ci-test
+      - run: npm run build:frontend
+      - run: npm run typecheck:ui
+      - run: npm run test:ui:ci

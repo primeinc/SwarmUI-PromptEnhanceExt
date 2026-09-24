@@ -195,6 +195,11 @@ public class PinParityTests
                 $"PromptEnhance.csproj's vendored PropertyGroup is missing <{property.Groups[1].Value}>, which SwarmUI.extension.props defines at the current pin.");
             Xunit.Assert.Equal(property.Groups[2].Value, actual.Groups[1].Value);
         }
+        foreach (string removal in new[] { "<None Remove=\"**\" />", "<Content Remove=\"**\" />" })
+        {
+            Xunit.Assert.True(props.Contains(removal), $"SwarmUI.extension.props no longer strips build items with {removal}; re-check the mirror in PromptEnhance.csproj.");
+            Xunit.Assert.True(csproj.Contains(removal), $"PromptEnhance.csproj must strip build items with {removal} as SwarmUI.extension.props does, or the Web SDK copies the repo's JSON (Tests/bin included) into bin.");
+        }
     }
 
     [Xunit.Fact]

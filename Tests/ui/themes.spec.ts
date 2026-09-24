@@ -95,8 +95,17 @@ test('the settings modal renders in every registered theme', async ({ page }) =>
     await page.locator('#pe_settings_button').click();
     const modal = page.locator('#pe_settings_modal .modal-content');
     await expect(modal).toBeVisible();
+    const broken: string[] = [];
     for (const [theme, cssPaths] of Object.entries(themes)) {
         await expect.poll(() => applyTheme(page, theme), { message: `theme ${theme} stylesheets load` }).toEqual(cssPaths);
+        const box = await modal.evaluate((elem) => {
+            const rect = elem.getBoundingClientRect();
+            return { width: rect.width, height: rect.height, background: getComputedStyle(elem).backgroundColor };
+        });
+        if (box.width < 200 || box.height < 200 || box.background === 'rgba(0, 0, 0, 0)' || box.background === 'transparent') {
+            broken.push(`${theme}: ${box.width}x${box.height} background ${box.background}`);
+        }
         await modal.screenshot({ path: path.join(shotDir, `modal-${theme}.png`) });
     }
+    expect(broken, 'the modal has a real size and an opaque background in every theme').toEqual([]);
 });

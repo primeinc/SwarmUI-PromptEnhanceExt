@@ -19,7 +19,12 @@ export default defineConfig({
     outputDir: './test-results',
     fullyParallel: false,
     workers: 1,
-    reporter: [['list']],
+    reporter: [['list'], ['./green-reporter.ts']],
+    /** The README screenshots are the toHaveScreenshot baselines; a tiny pixel tolerance absorbs antialiasing noise between runs. */
+    snapshotPathTemplate: '../../screenshots/{arg}{ext}',
+    expect: {
+        toHaveScreenshot: { maxDiffPixelRatio: 0.002, animations: 'disabled' },
+    },
     use: {
         baseURL: `http://localhost:${port}`,
         trace: 'retain-on-failure',

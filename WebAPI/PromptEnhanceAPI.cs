@@ -10,13 +10,16 @@ namespace PromptEnhance.WebAPI;
 /// <summary>The extension's two permission nodes. Both default to POWERUSERS with the POWERFUL safety level.</summary>
 public static class PromptEnhancePermissions
 {
+    /// <summary>The permission group the two nodes are listed under.</summary>
     public static readonly PermInfoGroup PromptEnhancePermGroup =
         new("PromptEnhance", "Permissions for the PromptEnhance prompt-enhancement extension.");
 
+    /// <summary>Gates every outbound call to the configured backend.</summary>
     public static readonly PermInfo PermUseBackend = Permissions.Register(new("promptenhance_use_backend",
         "Use Backend", "Allows outbound calls to the configured OpenAI-compatible backend (list models, enhance prompt).",
         PermissionDefault.POWERUSERS, PromptEnhancePermGroup, PermSafetyLevel.POWERFUL));
 
+    /// <summary>Gates reading, saving, and resetting the settings, including where backend calls go.</summary>
     public static readonly PermInfo PermConfig = Permissions.Register(new("promptenhance_config",
         "Manage Configuration", "Allows reading, saving, and resetting PromptEnhance settings.",
         PermissionDefault.POWERUSERS, PromptEnhancePermGroup, PermSafetyLevel.POWERFUL));
@@ -35,12 +38,14 @@ public class PromptEnhanceAPI
         API.RegisterAPICall(SessionSettings.ResetPromptEnhanceSettings, true, PromptEnhancePermissions.PermConfig);
     }
 
+    /// <summary>The PromptEnhanceRun success envelope carrying the enhanced prompt.</summary>
     public static JObject CreateSuccessResponse(string response) => new()
     {
         ["success"] = true,
         ["response"] = response
     };
 
+    /// <summary>The PromptEnhanceListModels success envelope.</summary>
     public static JObject CreateModelsResponse(List<ModelData> models)
     {
         JArray array = [];
@@ -55,6 +60,7 @@ public class PromptEnhanceAPI
         };
     }
 
+    /// <summary>The Get/Save/ResetPromptEnhanceSettings success envelope.</summary>
     public static JObject CreateSettingsResponse(JObject settings) => new()
     {
         ["success"] = true,

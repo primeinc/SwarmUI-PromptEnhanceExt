@@ -31,8 +31,8 @@ public static class UpstreamApiKey
         return string.IsNullOrEmpty(key) ? null : key;
     }
 
-    /// <summary>True when the key can travel as a header value: no whitespace or control characters.</summary>
-    public static bool IsSendable(string key) => !key.Any(c => char.IsWhiteSpace(c) || char.IsControl(c));
+    /// <summary>True when the key can travel as a bearer token: printable ASCII only (0x21-0x7E), since .NET refuses non-ASCII header values and whitespace or control characters would split the header.</summary>
+    public static bool IsSendable(string key) => key.All(c => c >= '!' && c <= '~');
 
     /// <summary>Sets `Authorization: Bearer` when a key is present. Callers check <see cref="IsSendable"/> first.</summary>
     public static void Apply(HttpRequestMessage request, string key)

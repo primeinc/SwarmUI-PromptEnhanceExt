@@ -63,33 +63,27 @@ class PromptEnhanceGenTab {
         genTabLayout.altPromptSizeHandle();
     }
 
-    /** Reads the currently selected Generate-tab image into a base64 part. Returns null when no image is selected; throws when an image exists but cannot be read. */
-    async getSelectedImage(): Promise<PEImagePart | null> {
+    /** Reads the currently selected Generate-tab image into a base64 part through SwarmUI's imageToData. Returns null when no image is selected; throws when an image exists but does not read as an image. */
+    getSelectedImage(): Promise<PEImagePart | null> {
         let img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
             || document.querySelector<HTMLImageElement>('#current_image img');
-        if (!img?.src) {
-            return null;
+        let src = img?.getAttribute('src');
+        if (!src) {
+            return Promise.resolve(null);
         }
-        try {
-            let resp = await fetch(img.src);
-            let blob = await resp.blob();
-            return await new Promise<PEImagePart>((resolve, reject) => {
-                let reader = new FileReader();
-                reader.onloadend = () => {
-                    let base64 = `${reader.result}`.split(',')[1];
-                    if (!base64) {
-                        reject(new Error('The selected image could not be read.'));
-                        return;
-                    }
-                    resolve({ data: base64, mediaType: blob.type || 'image/jpeg' });
-                };
-                reader.onerror = () => reject(new Error('The selected image could not be read.'));
-                reader.readAsDataURL(blob);
+        return new Promise((resolve, reject) => {
+            imageToData(src, (dataUrl) => {
+                let text = dataUrl ?? '';
+                let comma = text.indexOf(',');
+                let header = comma > 0 ? text.substring(0, comma) : '';
+                let data = comma > 0 ? text.substring(comma + 1) : '';
+                if (!header.startsWith('data:image/') || !header.endsWith(';base64') || !data) {
+                    reject(new Error('Could not attach the selected image: it did not load as an image.'));
+                    return;
+                }
+                resolve({ data: data, mediaType: header.substring('data:'.length, header.length - ';base64'.length) });
             });
-        }
-        catch (err) {
-            throw new Error(`Could not attach the selected image: ${peErrorText(err)}`);
-        }
+        });
     }
 
     /** One PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport failures resolve, never reject. */
@@ -106,7 +100,7 @@ class PromptEnhanceGenTab {
     applyEnhancement(original: string, enhanced: string): void {
         let mode = promptEnhanceSettings.effective().replaceMode;
         if (mode == 'append') {
-            this.setPrompt(`${original}\n\n---\n\n${enhanced}`);
+            this.setPrompt(`${original.trimEnd()}\n\n---\n\n${enhanced}`);
             this.hideRestore();
             return;
         }
@@ -174,8 +168,8 @@ class PromptEnhanceGenTab {
         if (this.enhancing) {
             return;
         }
-        let original = this.promptBox().value.trim();
-        if (!original) {
+        let original = this.promptBox().value;
+        if (!original.trim()) {
             this.showError('Type a prompt to enhance first.');
             return;
         }
@@ -183,7 +177,7 @@ class PromptEnhanceGenTab {
         this.setLoading(true);
         this.hidePreview();
         try {
-            let payload: PEEnhancePayload = { prompt: original };
+            let payload: PEEnhancePayload = { prompt: original.trim() };
             if (promptEnhanceSettings.effective().sendSelectedImage) {
                 let image = await this.getSelectedImage();
                 if (image) {

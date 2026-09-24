@@ -82,7 +82,6 @@ interface BootOpts {
     backendResponse?: unknown;
     routeResponses?: Record<string, unknown>;
     routeErrors?: Record<string, unknown>;
-    fetch?: (url: string) => Promise<{ blob(): Promise<Blob> }>;
     throwingShowError?: boolean;
     genTabLayout?: SwarmGenTabLayout;
     /** When true, boot leaves `sessionReadyCallbacks` unfired; the test fires them via `fireSessionReady`. */
@@ -175,9 +174,6 @@ async function boot(opts: BootOpts): Promise<BootResult> {
     host.triggerChangeFor = () => { };
     host.genTabLayout = opts.genTabLayout ?? { altPromptSizeHandle: () => { } };
     win.sessionReadyCallbacks = [];
-    if (opts.fetch) {
-        win.fetch = opts.fetch as unknown as typeof win.fetch;
-    }
     if (opts.prompt !== undefined) {
         (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = opts.prompt;
     }
@@ -248,33 +244,32 @@ test('A real click on Enhance with an empty prompt surfaces an error and sends n
     assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no enhance request for an empty prompt');
 });
 
-test('Image-collection failure surfaces an error, sends nothing, and clears loading', async () => {
+test('A selected image that does not load as an image surfaces an error, sends nothing, and clears loading', async () => {
     const { doc, calls, pe } = await boot({
         prompt: 'a cat',
         settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'blob:current' },
-        fetch: async () => { throw new Error('network down'); }
+        image: { src: 'data:text/html;base64,PHA+NDA0PC9wPg==' }
     });
     await pe.genTab.handleEnhance();
-    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no request when the attached image cannot be read');
+    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no request when the attached image is not an image');
     assert.strictEqual(calls.showError.length, 1, 'the failure is surfaced');
+    assert.ok(calls.showError[0]!.includes('did not load as an image'), 'the error says why');
     assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
 });
 
-test('A selected image is read via the real FileReader and attached as base64 media', async () => {
-    const { win, calls, pe } = await boot({
+test('A selected image is read through SwarmUI\'s imageToData and attached as base64 media', async () => {
+    const { calls, pe } = await boot({
         prompt: 'a cat',
         settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'blob:current' },
-        fetch: async () => ({ blob: async () => new win.Blob([new Uint8Array([65, 66, 67])], { type: 'image/png' }) })
+        image: { src: 'data:image/png;base64,QUJD' }
     });
     await pe.genTab.handleEnhance();
     const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
     assert.strictEqual(runs.length, 1, 'one enhance request');
     const media = runs[0]!.payload.media;
     assert.ok(Array.isArray(media) && media.length === 1, 'one image part');
-    assert.strictEqual(media[0]!.data, 'QUJD', 'base64 from the real FileReader');
-    assert.strictEqual(media[0]!.mediaType, 'image/png', 'media type from the real Blob');
+    assert.strictEqual(media[0]!.data, 'QUJD', 'base64 read by the host helper');
+    assert.strictEqual(media[0]!.mediaType, 'image/png', 'media type from the data URL');
 });
 
 test('No selected image is a text-only request', async () => {
@@ -321,6 +316,17 @@ test('Replace mode replaces the prompt and Restore brings the original back', as
     assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'none', 'Restore hidden again');
 });
 
+test('Restore brings back the prompt exactly as typed, while the backend gets it trimmed', async () => {
+    const typed = '  a cat on a mat \n';
+    const { doc, calls, pe } = await boot({ prompt: typed, settings: { replaceMode: 'replace_with_restore' } });
+    await pe.genTab.handleEnhance();
+    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
+    assert.strictEqual(runs[0]!.payload.prompt, 'a cat on a mat', 'the backend gets the trimmed prompt');
+    assert.strictEqual(promptValue(doc), 'ENHANCED PROMPT', 'the prompt is replaced');
+    doc.getElementById('pe_restore_btn')!.click();
+    assert.strictEqual(promptValue(doc), typed, 'Restore returns the untrimmed original');
+});
+
 test('Replace mode keeps the TRUE original across a second enhance', async () => {
     const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
     pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED1');
@@ -354,7 +360,7 @@ test('Contract: defaults, routes, API key type, replace modes, and bounds match 
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pe.PE_LIMITS)), {
         timeoutSeconds: { min: CONTRACT.settings.timeoutSeconds!.min, max: CONTRACT.settings.timeoutSeconds!.max },
         temperature: { min: CONTRACT.settings.temperature!.min, max: CONTRACT.settings.temperature!.max },
-        maxTokens: { min: CONTRACT.settings.maxTokens!.min }
+        maxTokens: { min: CONTRACT.settings.maxTokens!.min, max: CONTRACT.settings.maxTokens!.max }
     }, 'bounds equal the contract');
 });
 

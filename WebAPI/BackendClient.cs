@@ -16,22 +16,44 @@ namespace PromptEnhance.WebAPI;
 [API.APIClass("PromptEnhance extension: calls to the user's configured OpenAI-compatible backend (model list and prompt enhancement).")]
 public class BackendClient
 {
+    /// <summary>The one client for every backend call; see <see cref="CreateHttpClient"/>.</summary>
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
+    /// <summary>SwarmUI's <see cref="NetworkBackendUtils.MakeHttpClient"/> configuration with automatic redirects off, so a request never leaves the configured Base URL. Per-request timeouts come from settings.</summary>
     private static HttpClient CreateHttpClient()
     {
-        HttpClient client = NetworkBackendUtils.MakeHttpClient();
+        HttpClient client = new(new SocketsHttpHandler() { PooledConnectionLifetime = TimeSpan.FromMinutes(10), MaxConnectionsPerServer = 1000, AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"SwarmUI/{Utilities.Version}");
         client.Timeout = Timeout.InfiniteTimeSpan;
         return client;
     }
 
+    /// <summary>A classified error for a 3xx response, naming where the backend tried to send the request; null for any other status.</summary>
+    private static JObject RedirectError(HttpResponseMessage response)
+    {
+        int status = (int)response.StatusCode;
+        if (status < 300 || status > 399)
+        {
+            return null;
+        }
+        string target = response.Headers.Location?.ToString() ?? "(no Location header)";
+        return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.HttpError,
+            $"The backend answered {status} redirecting to {target}. PromptEnhance does not follow redirects: set the Base URL to the address the server redirects to.");
+    }
+
+    /// <summary>How long the reachability probe waits for any response before letting the real call proceed.</summary>
     private const int ReachabilityTimeoutSeconds = 3;
+
+    /// <summary>How long a "reachable" probe result is reused.</summary>
     private static readonly TimeSpan ReachabilityTtlSuccess = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long an "unreachable" probe result is reused.</summary>
     private static readonly TimeSpan ReachabilityTtlFailure = TimeSpan.FromSeconds(30);
 
+    /// <summary>Probe results keyed by normalized Base URL.</summary>
     private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
 
-    /// <summary>Normalizes a base URL: trims, strips trailing slashes and a trailing `/v1`, requires an absolute http(s) URI. Returns null otherwise.</summary>
+    /// <summary>Normalizes a base URL: trims, strips trailing slashes and a trailing `/v1`, requires an absolute http(s) URI with no query, fragment, or user info (any of which would change the path or host the fixed `/v1/...` suffix reaches). Returns null otherwise.</summary>
     public static string NormalizeBaseUrl(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -39,12 +61,17 @@ public class BackendClient
             return null;
         }
         string trimmed = raw.Trim().TrimEnd('/');
+        if (trimmed.Contains('?') || trimmed.Contains('#'))
+        {
+            return null;
+        }
         if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
         {
             trimmed = trimmed[..^3].TrimEnd('/');
         }
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out Uri uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+            !string.IsNullOrEmpty(uri.UserInfo))
         {
             return null;
         }
@@ -97,7 +124,7 @@ public class BackendClient
 
     /// <summary>The error for a saved API key that cannot be sent as a header value. Never includes the key.</summary>
     private static JObject UnsendableKeyError() => PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Authentication,
-        "The saved PromptEnhance API key contains spaces or line breaks. Re-enter it under User → API Keys.");
+        "The saved PromptEnhance API key contains spaces, line breaks, or non-ASCII characters, so it cannot be sent. Re-enter it under User → API Keys.");
 
     private static async Task<(JObject settings, string normalizedBase, string apiKey)> ResolveConfig(Session session, Action<JObject> setError)
     {
@@ -162,6 +189,11 @@ public class BackendClient
             UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
+            JObject redirect = RedirectError(response);
+            if (redirect != null)
+            {
+                return redirect;
+            }
             if (!response.IsSuccessStatusCode)
             {
                 return PromptEnhanceAPI.CreateErrorResponse(ErrorHandler.CategorizeHttpStatus(response.StatusCode), PromptEnhanceAPI.ExtractErrorMessage(body));
@@ -255,6 +287,11 @@ public class BackendClient
             UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
+            JObject redirect = RedirectError(response);
+            if (redirect != null)
+            {
+                return redirect;
+            }
             if (!response.IsSuccessStatusCode)
             {
                 PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
