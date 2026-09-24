@@ -1,5 +1,8 @@
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
@@ -19,13 +22,65 @@ public class BackendClient
     /// <summary>The one client for every backend call; see <see cref="CreateHttpClient"/>.</summary>
     internal static readonly HttpClient HttpClient = CreateHttpClient();
 
-    /// <summary>SwarmUI's <see cref="NetworkBackendUtils.MakeHttpClient"/> configuration with automatic redirects off, so a request never leaves the configured Base URL. Per-request timeouts come from settings.</summary>
+    /// <summary>SwarmUI's <see cref="NetworkBackendUtils.MakeHttpClient"/> configuration with automatic redirects off, so a request never leaves the configured Base URL, and <see cref="ConnectToFirstAddressAsync"/> as the connect step. Per-request timeouts come from settings.</summary>
     private static HttpClient CreateHttpClient()
     {
-        HttpClient client = new(new SocketsHttpHandler() { PooledConnectionLifetime = TimeSpan.FromMinutes(10), MaxConnectionsPerServer = 1000, AllowAutoRedirect = false });
+        HttpClient client = new(new SocketsHttpHandler() { PooledConnectionLifetime = TimeSpan.FromMinutes(10), MaxConnectionsPerServer = 1000, AllowAutoRedirect = false, ConnectCallback = ConnectToFirstAddressAsync });
         client.DefaultRequestHeaders.UserAgent.ParseAdd($"SwarmUI/{Utilities.Version}");
         client.Timeout = Timeout.InfiniteTimeSpan;
         return client;
+    }
+
+    /// <summary>Connects to every address the host resolves to at once and keeps the first that answers. The default connect tries them one after another, and Windows retries a refused SYN for about 2s per address, so a dead `localhost` (::1 and 127.0.0.1) outlasts the reachability probe.</summary>
+    private static async ValueTask<Stream> ConnectToFirstAddressAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    {
+        DnsEndPoint endPoint = context.DnsEndPoint;
+        IPAddress[] addresses = IPAddress.TryParse(endPoint.Host, out IPAddress literal) ? [literal] : await Dns.GetHostAddressesAsync(endPoint.Host, cancellationToken);
+        if (addresses.Length == 0)
+        {
+            throw new SocketException((int)SocketError.HostNotFound);
+        }
+        using CancellationTokenSource others = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        List<Task<Socket>> attempts = [.. addresses.Select(address => ConnectSocketAsync(new IPEndPoint(address, endPoint.Port), others.Token))];
+        Exception firstFailure = null;
+        while (attempts.Count > 0)
+        {
+            Task<Socket> finished = await Task.WhenAny(attempts);
+            attempts.Remove(finished);
+            try
+            {
+                Socket socket = await finished;
+                others.Cancel();
+                foreach (Task<Socket> loser in attempts)
+                {
+                    _ = loser.ContinueWith(t => t.Result.Dispose(), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+                }
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (Exception ex)
+            {
+                firstFailure ??= ex;
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        ExceptionDispatchInfo.Throw(firstFailure);
+        return null;
+    }
+
+    /// <summary>One TCP connect with Nagle off, as SocketsHttpHandler's own connect does; the socket is disposed on failure.</summary>
+    private static async Task<Socket> ConnectSocketAsync(IPEndPoint endPoint, CancellationToken cancellationToken)
+    {
+        Socket socket = new(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(endPoint, cancellationToken);
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     /// <summary>A classified error for a 3xx response, naming where the backend tried to send the request; null for any other status.</summary>

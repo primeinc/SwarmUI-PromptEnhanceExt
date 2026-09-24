@@ -6,8 +6,8 @@ namespace PromptEnhance.Tests;
 /// <summary>The extension builds its own HttpClient so it can turn redirects off. These tests fail when SwarmUI's NetworkBackendUtils.MakeHttpClient changes a client or handler setting the copy does not follow: every public settable property, one level into option objects such as SslOptions and CookieContainer, plus every default request header.</summary>
 public class HttpClientParityTests
 {
-    /// <summary>The settings the extension deliberately differs on: no automatic redirects, and per-request timeouts instead of a client-wide one.</summary>
-    private static readonly string[] DeliberateDifferences = [nameof(SocketsHttpHandler.AllowAutoRedirect), nameof(HttpClient.Timeout)];
+    /// <summary>The settings the extension deliberately differs on: no automatic redirects, a connect step that tries every resolved address at once, and per-request timeouts instead of a client-wide one.</summary>
+    private static readonly string[] DeliberateDifferences = [nameof(SocketsHttpHandler.AllowAutoRedirect), nameof(SocketsHttpHandler.ConnectCallback), nameof(HttpClient.Timeout)];
 
     private static SocketsHttpHandler HandlerOf(HttpClient client)
     {
@@ -94,9 +94,10 @@ public class HttpClientParityTests
     }
 
     [Xunit.Fact]
-    public void ExtensionClient_DoesNotFollowRedirects_AndLeavesTimeoutsToEachRequest()
+    public void ExtensionClient_DoesNotFollowRedirects_ConnectsToAllAddresses_AndLeavesTimeoutsToEachRequest()
     {
         Xunit.Assert.False(HandlerOf(WebAPI.BackendClient.HttpClient).AllowAutoRedirect);
+        Xunit.Assert.NotNull(HandlerOf(WebAPI.BackendClient.HttpClient).ConnectCallback);
         Xunit.Assert.Equal(Timeout.InfiniteTimeSpan, WebAPI.BackendClient.HttpClient.Timeout);
     }
 }
