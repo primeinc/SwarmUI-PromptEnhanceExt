@@ -9,6 +9,9 @@ const fakeBackendPort = Number(process.env.PE_FAKE_BACKEND_PORT ?? 7897);
 /** Port of the fake backend that requires `Authorization: Bearer <PE_FAKE_BACKEND_KEY>`. */
 const fakeKeyedBackendPort = Number(process.env.PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
 
+/** True when every port is the one the README screenshots were taken with. */
+const usesDefaultPorts = port === 7898 && fakeBackendPort === 7897 && fakeKeyedBackendPort === 7896;
+
 /**
  * Browser gates against the real vendored SwarmUI host with this extension copied in.
  * `just ui-test` builds the frontend, syncs the extension copy, and builds the host first;
@@ -20,10 +23,16 @@ export default defineConfig({
     fullyParallel: false,
     workers: 1,
     reporter: [['list'], ['./green-reporter.ts']],
-    /** The README screenshots are the toHaveScreenshot baselines; a tiny pixel tolerance absorbs antialiasing noise between runs. */
+    /**
+     * The README screenshots are the toHaveScreenshot baselines. No pixel may differ beyond the
+     * per-pixel color threshold, so a single changed character is a difference: a plain run fails,
+     * and --update-snapshots=changed (`just ui-test`) rewrites the baseline. They are taken on the
+     * default ports, whose values the settings modal shows, so other ports skip the comparison.
+     */
     snapshotPathTemplate: '../../screenshots/{arg}{ext}',
+    ignoreSnapshots: !usesDefaultPorts,
     expect: {
-        toHaveScreenshot: { maxDiffPixelRatio: 0.002, animations: 'disabled' },
+        toHaveScreenshot: { maxDiffPixels: 0, animations: 'disabled' },
     },
     use: {
         baseURL: `http://localhost:${port}`,

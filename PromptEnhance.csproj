@@ -38,6 +38,7 @@
     <Import Project="vendor/SwarmUI/src/SwarmUI.deps.props" Condition="'$(UseVendoredSwarmUI)' == 'true' and Exists('vendor/SwarmUI/src/SwarmUI.deps.props')" />
 
     <ItemGroup>
+        <InternalsVisibleTo Include="PromptEnhance.Tests" />
         <Compile Remove="Tests/**/*.cs" />
         <Compile Remove="vendor/**/*.cs" />
         <!-- As SwarmUI.extension.props: SwarmUI serves extension assets from the source
