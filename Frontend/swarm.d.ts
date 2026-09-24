@@ -81,6 +81,8 @@ interface PELimits {
 
 interface PromptEnhanceNamespace {
     initialized?: boolean;
+    /** Settles when the session-ready startup (mount, settings load, model fetch kick-off) has finished. */
+    ready?: Promise<void>;
     enhancing?: boolean;
     /** The earliest pre-enhancement prompt, stashed once per replace cycle. Never overwritten while non-null; cleared only by Restore. */
     lastOriginal?: string | null;
@@ -111,6 +113,9 @@ interface SwarmGenTabLayout {
 }
 
 declare var genTabLayout: SwarmGenTabLayout;
+
+/** SwarmUI startup hooks (site.js), fired by genpage main.js once the session exists and the Generate tab is initialized. */
+declare var sessionReadyCallbacks: (() => void)[];
 
 /** SwarmUI host API transport (site.js). Sends a session-authenticated POST to `/API/<route>`. `onError` receives whatever the host passes (string or Error-like). */
 declare function genericRequest(

@@ -28,9 +28,11 @@ async function openGenerateTab(page: Page): Promise<void> {
     await expect(page.locator('#pe_enhance_btn')).toBeVisible();
 }
 
-test.fail('Generate tab renders with the extension loaded', async ({ page }) => {
+test('Generate tab renders with the extension loaded', async ({ page }) => {
     const errors = collectErrors(page);
+    const settingsLoaded = page.waitForResponse((resp) => resp.url().endsWith('/API/GetPromptEnhanceSettings') && resp.status() === 200);
     await openGenerateTab(page);
+    await settingsLoaded;
     await page.screenshot({ path: path.join(shotDir, 'generate-tab.png') });
     await page.locator('#alt_prompt_region').screenshot({ path: path.join(shotDir, 'prompt-region.png') });
     expect(errors).toEqual([]);

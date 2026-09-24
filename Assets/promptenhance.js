@@ -245,21 +245,13 @@ function peAddPromptButtons() {
     });
     preview.querySelector('#pe_preview_cancel').addEventListener('click', peHidePreview);
 }
-/** Polls for `#alt_prompt_extra_area` (every 250ms, up to ~10s) and injects the buttons when it appears. */
-function peEnsureButtons(attempt = 0) {
-    if (document.getElementById('alt_prompt_extra_area')) {
-        peAddPromptButtons();
-        return;
-    }
-    if (attempt < 40) {
-        setTimeout(() => peEnsureButtons(attempt + 1), 250);
-    }
-}
-document.addEventListener('DOMContentLoaded', async () => {
+/** Mounts the Enhance UI and loads settings once SwarmUI has a session and has laid out the Generate tab. Runs once. */
+async function peOnSessionReady() {
     if (PromptEnhance.initialized) {
         return;
     }
     PromptEnhance.initialized = true;
+    peAddPromptButtons();
     try {
         if (PromptEnhance.loadSettings) {
             await PromptEnhance.loadSettings();
@@ -268,11 +260,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     catch (err) {
         console.error('[PromptEnhance] settings load failed (continuing):', err);
     }
-    peEnsureButtons();
     try {
         PromptEnhance.fetchModels?.();
     }
     catch (err) {
         console.error('[PromptEnhance] model fetch failed (continuing):', err);
     }
+}
+sessionReadyCallbacks.push(() => {
+    PromptEnhance.ready = peOnSessionReady();
 });

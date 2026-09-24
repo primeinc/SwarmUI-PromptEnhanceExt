@@ -41,8 +41,6 @@ const PAGE_HTML = `<!DOCTYPE html><html><body>
   </div>
 </body></html>`;
 
-const BARE_HTML = '<!DOCTYPE html><html><body></body></html>';
-
 interface RecordedCall {
     route: string;
     payload: PEEnhancePayload & { settings?: Partial<PESettings> };
@@ -67,14 +65,16 @@ interface BootOpts {
     pageHtml?: string;
     throwingShowError?: boolean;
     genTabLayout?: SwarmGenTabLayout;
+    /** When true, boot leaves `sessionReadyCallbacks` unfired; the test fires them via `fireSessionReady`. */
+    holdSessionReady?: boolean;
 }
 
 type PETestWindow = DOMWindow & {
     PromptEnhance: PromptEnhanceNamespace;
+    sessionReadyCallbacks: (() => void)[];
     peAddPromptButtons: () => void;
     peHandleEnhance: () => Promise<void>;
     peApplyEnhancement: (original: string, enhanced: string) => void;
-    peEnsureButtons: (attempt?: number) => void;
     peSaveSettings: () => Promise<boolean>;
     peResetSettings: () => Promise<boolean>;
     peFetchModels: () => Promise<void>;
@@ -87,6 +87,8 @@ interface BootResult {
     win: PETestWindow;
     doc: Document;
     calls: BootCalls;
+    /** Fires SwarmUI's session-ready hooks the way genpage main.js does, then awaits the startup they begin. */
+    fireSessionReady: () => Promise<void>;
 }
 
 async function boot(opts: BootOpts): Promise<BootResult> {
@@ -125,6 +127,7 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         realConsoleWarn(...args);
     }) as typeof win.console.warn;
     win.triggerChangeFor = () => { };
+    win.sessionReadyCallbacks = [];
     if (opts.genTabLayout) {
         (win as unknown as { genTabLayout: SwarmGenTabLayout }).genTabLayout = opts.genTabLayout;
     }
@@ -149,13 +152,20 @@ async function boot(opts: BootOpts): Promise<BootResult> {
     assert.strictEqual(typeof win.peAddPromptButtons, 'function', 'peAddPromptButtons must load as a real window function');
     assert.strictEqual(typeof win.peHandleEnhance, 'function', 'peHandleEnhance must load as a real window function');
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    const fireSessionReady = async () => {
+        for (const callback of win.sessionReadyCallbacks) {
+            callback();
+        }
+        await win.PromptEnhance.ready;
+    };
+    if (!opts.holdSessionReady) {
+        await fireSessionReady();
+    }
 
     if (opts.settings) {
         win.PromptEnhance.settings = opts.settings;
     }
-    return { dom, win, doc, calls };
+    return { dom, win, doc, calls, fireSessionReady };
 }
 
 const tests: { name: string; fn: () => void | Promise<void> }[] = [];
@@ -529,16 +539,17 @@ test('fetchModels transport error (onError path) is classified, not swallowed', 
     assert.strictEqual(doc.getElementById('pe_settings_status')!.textContent, 'socket hang up', 'transport error text reaches the status line');
 });
 
-test('peEnsureButtons retries until the Generate-tab region appears (async SwarmUI render)', async () => {
-    const { win, doc } = await boot({ pageHtml: BARE_HTML });
-    win.peEnsureButtons();
-    assert.strictEqual(doc.getElementById('pe_button_bar'), null, 'no bar while the region is absent');
-    const region = doc.createElement('div');
-    region.id = 'alt_prompt_region';
-    region.innerHTML = '<div id="alt_prompt_extra_area"></div><textarea id="alt_prompt_textbox"></textarea>';
-    doc.body.appendChild(region);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    assert.ok(doc.getElementById('pe_button_bar'), 'the retry loop injects the bar once the region exists');
+test('Nothing mounts and no API call is made until SwarmUI signals the session is ready', async () => {
+    const { win, doc, calls, fireSessionReady } = await boot({ holdSessionReady: true });
+    assert.strictEqual(win.sessionReadyCallbacks.length, 1, 'startup registers exactly one session-ready hook');
+    assert.strictEqual(doc.getElementById('pe_button_bar'), null, 'no bar before the session is ready');
+    assert.strictEqual(calls.genericRequest.length, 0, 'no API call before the session is ready');
+    await fireSessionReady();
+    assert.ok(doc.getElementById('pe_button_bar'), 'the session-ready hook mounts the bar');
+    assert.deepStrictEqual(calls.genericRequest.map((c) => c.route), ['GetPromptEnhanceSettings'], 'the session-ready hook loads settings');
+    await fireSessionReady();
+    assert.strictEqual(doc.querySelectorAll('#pe_button_bar').length, 1, 'a repeated signal does not remount');
+    assert.strictEqual(calls.genericRequest.length, 1, 'a repeated signal does not reload settings');
 });
 
 test('Every change to the extension UI height asks SwarmUI to re-offset the prompt region', async () => {
