@@ -17,3 +17,5 @@ Thumbs.db
 /.env
 /config.json
 /Tests/frontend/out
+/Tests/ui/shots
+/Tests/ui/test-results

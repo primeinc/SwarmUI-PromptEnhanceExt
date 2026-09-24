@@ -77,7 +77,7 @@ The C# suite runs on xunit.v3 and is gated on both test platforms; the `justfile
 
 Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
 
-Two more standalone-workspace recipes: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` boots the real host with SwarmUI's `--ci_test` mode — any logged error fails the gate with a nonzero exit.
+Standalone-workspace recipes that run the real host: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` boots the real host with SwarmUI's `--ci_test` mode — any logged error fails the gate with a nonzero exit; `just ui-test` rebuilds the frontend and host, boots the host on port 7898 through Playwright's `webServer`, and drives the Generate tab in headless Chromium (`Tests/ui/*.spec.ts`), writing screenshots to `Tests/ui/shots/`. Run `just ui-install` once to fetch the browser. Tests declared with `test.fail` pin known defects: they pass while the defect is present and fail the gate once it is fixed, so the fix commit flips them to `test`.
 
 ## License
 

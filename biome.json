@@ -1,0 +1,15 @@
+{
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "files": {
+        "includes": ["Frontend/**/*.ts", "Tests/**/*.ts", "!!**/vendor", "!!**/node_modules", "!!**/out", "!!**/test-results"]
+    },
+    "formatter": {
+        "enabled": false
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended"
+        }
+    }
+}

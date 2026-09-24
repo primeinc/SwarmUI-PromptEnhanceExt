@@ -91,17 +91,28 @@ vendor-bump sha:
   just backend-test
   just vendor-ci-test
 
+# Build the vendored host (with the freshly copied extension) into src/bin/live_release
+vendor-host-build: vendor-dev
+  dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
+
 # Live host boot gate: SwarmUI's --ci_test boots the real host with this extension and exits nonzero on any logged error.
 [windows]
-vendor-ci-test port='7899': vendor-dev
-  dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
+vendor-ci-test port='7899': vendor-host-build
   Push-Location vendor/SwarmUI; dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{port}}; $code = $LASTEXITCODE; Pop-Location; exit $code
 
 # Live host boot gate (see the [windows] variant for details)
 [unix]
-vendor-ci-test port='7899': vendor-dev
-  dotnet build vendor/SwarmUI/src/SwarmUI.csproj --configuration Debug -o vendor/SwarmUI/src/bin/live_release
+vendor-ci-test port='7899': vendor-host-build
   cd vendor/SwarmUI && dotnet src/bin/live_release/SwarmUI.dll --environment dev --ci_test true --launch_mode none --port {{port}}
+
+# Install the Playwright browser the UI gates drive
+ui-install:
+  npm run ui:install
+
+# Browser gates against the real vendored host: rebuilds the frontend and host first so the copy served is current. Screenshots land in Tests/ui/shots.
+ui-test: frontend-build vendor-host-build
+  npm run typecheck:ui
+  npm run test:ui
 
 # Build extension C# project
 backend-build:

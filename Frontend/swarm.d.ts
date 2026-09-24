@@ -104,6 +104,14 @@ interface Window {
 
 declare var PromptEnhance: PromptEnhanceNamespace;
 
+/** SwarmUI Generate-tab layout singleton (js/genpage/gentab/layout.js). */
+interface SwarmGenTabLayout {
+    /** Re-offsets `#alt_prompt_region` from the heights of both prompt textareas and `#alt_prompt_extra_area`, then reflows the tab. */
+    altPromptSizeHandle(): void;
+}
+
+declare var genTabLayout: SwarmGenTabLayout;
+
 /** SwarmUI host API transport (site.js). Sends a session-authenticated POST to `/API/<route>`. `onError` receives whatever the host passes (string or Error-like). */
 declare function genericRequest(
     route: string,
