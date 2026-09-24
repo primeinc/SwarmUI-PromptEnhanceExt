@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { callRoute, fakeBackendUrl, openGenerateTab, useFakeBackend, useSettings } from './host';
+import { callRoute, fakeBackendUrl, openGenerateTab, readmeShotDir, useFakeBackend, useSettings } from './host';
 
 const shotDir = path.join(__dirname, 'shots');
 const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'contracts', 'pe-contract.json'), 'utf8')) as {
@@ -26,8 +26,9 @@ test('lists the backend models and saves changed values', async ({ page }) => {
     await expect(page.locator('#pe_model_select option[value="fake-enhancer"]')).toHaveCount(1);
     await expect(page.locator('#pe_model_select')).toHaveValue('fake-enhancer');
     await page.locator('#pe_temperature').fill('1.25');
-    await page.locator('#pe_base_url').fill(`  ${fakeBackendUrl}  `);
     await page.screenshot({ path: path.join(shotDir, 'settings-modal.png') });
+    await page.locator('#pe_settings_modal .modal-content').screenshot({ path: path.join(readmeShotDir, 'settings-modal.png'), animations: 'disabled' });
+    await page.locator('#pe_base_url').fill(`  ${fakeBackendUrl}  `);
     await page.locator('#pe_save_btn').click();
     await expect(page.locator('#pe_settings_status')).toHaveText('Saved.');
     await expect(page.locator('#pe_settings_status')).toHaveClass(/modal_success_bottom/);

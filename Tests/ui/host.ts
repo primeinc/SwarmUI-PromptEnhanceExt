@@ -1,4 +1,13 @@
 import { expect, type Page } from '@playwright/test';
+import * as path from 'node:path';
+
+/** Cropped screenshots for the README; `just readme-shots` copies them into ./screenshots. */
+export const readmeShotDir = path.join(__dirname, 'shots', 'readme');
+
+/** Screenshots the Generate-tab prompt region (the extension bar, preview, and prompt boxes) for the README. */
+export async function shootPromptRegion(page: Page, name: string): Promise<void> {
+    await page.locator('#alt_prompt_region').screenshot({ path: path.join(readmeShotDir, `${name}.png`), animations: 'disabled' });
+}
 
 /** The OpenAI-compatible fake backend started by playwright.config.ts. */
 export const fakeBackendUrl = `http://127.0.0.1:${process.env.PE_FAKE_BACKEND_PORT ?? 7897}`;

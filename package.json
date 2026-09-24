@@ -12,7 +12,10 @@
     "typecheck:ui": "tsc -p Tests/ui",
     "test:ui": "playwright test -c Tests/ui",
     "ui:install": "playwright install chromium",
-    "lint": "biome lint --reporter=github --max-diagnostics=500"
+    "lint": "biome lint --reporter=github --max-diagnostics=500",
+    "shots:clean": "node Tests/ui/readme-shots.mts clean",
+    "shots:write": "node Tests/ui/readme-shots.mts write",
+    "shots:check": "node Tests/ui/readme-shots.mts check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

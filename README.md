@@ -1,6 +1,10 @@
 # PromptEnhance
 
-A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt text (and optionally the currently selected image) to a user-configured OpenAI-compatible chat endpoint, which rewrites the prompt into a more detailed one. The result is applied according to the `replaceMode` setting: shown as a preview to apply manually, appended below the original, or swapped in with a Restore button that recovers the original.
+A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt (and optionally the selected image) to an OpenAI-compatible chat server you configure, such as Ollama, LM Studio, or llama.cpp's server. The server rewrites the prompt into a more detailed one, and the result is shown for approval, appended, or swapped in with a Restore button.
+
+![The Enhance Prompt button and settings gear above the Generate-tab prompt box](screenshots/enhance-button.png)
+
+Tested against SwarmUI v0.9.8.3 (commit [`96a4c3d`](https://github.com/mcmonkeyprojects/SwarmUI/commit/96a4c3d14a31776bab5e3300301e078c15875f22)).
 
 ## Install
 
@@ -12,6 +16,51 @@ git clone https://github.com/primeinc/SwarmUI-PromptEnhanceExt.git PromptEnhance
 ```
 
 SwarmUI compiles extensions as part of its own build, so a restart (which rebuilds) is all that is needed. If the extension is listed in Swarm's extension manager (`Server` → `Extensions`), it can also be installed from there.
+
+You also need an OpenAI-compatible chat server that does not require an API key (see [Authentication limitation](#authentication-limitation)). The default Base URL, `http://localhost:11434`, is Ollama's.
+
+## Usage
+
+1. Open the **Generate** tab. The **Enhance Prompt** button and a ⚙️ settings button sit directly above the prompt box.
+2. Click ⚙️ to open **PromptEnhance Settings**. Set the **Base URL** of your server and click **Save**. Reopen settings (or click **Refresh Models**) to load that server's model list, then pick a **Model** and **Save** again.
+3. Type a prompt and click **Enhance Prompt**. While the request runs, the button is disabled and a loading indicator shows.
+
+![The PromptEnhance Settings modal](screenshots/settings-modal.png)
+
+What happens to the result depends on **Apply Mode**:
+
+| Apply Mode | Result |
+| --- | --- |
+| **Preview (Apply / Cancel)** (default) | The enhanced text appears in a panel above the prompt, and the prompt itself is untouched. **Apply** replaces the prompt; **Cancel** discards the result. |
+| **Append (keep original)** | The enhanced text is added below the original prompt, separated by `---`. |
+| **Replace (with Restore button)** | The enhanced text replaces the prompt immediately. |
+
+After a replace (whether from **Apply** in Preview mode or from Replace mode), a **Restore Previous Prompt** button appears. It puts back the prompt as it was before the first enhancement, even after several enhancements in a row.
+
+![An enhancement awaiting Apply or Cancel in Preview mode](screenshots/enhance-preview.png)
+
+![After Apply: the enhanced prompt with the Restore Previous Prompt button](screenshots/enhance-restore.png)
+
+The screenshots come from the extension's browser tests, which run it against a stub server that answers `ENHANCED: <your prompt>`. A real model returns a rewritten prompt.
+
+**Send Selected Image** attaches the image currently selected on the Generate tab to the request, which needs a vision-capable model. With no image selected, the request is text-only.
+
+Settings are saved per user, on the server. Each field in the settings modal has a **?** popover describing it.
+
+### Troubleshooting
+
+Errors from **Enhance Prompt** appear in SwarmUI's error banner. Errors in the settings modal appear in red at the bottom of the modal.
+
+| Message | Fix |
+| --- | --- |
+| `Type a prompt to enhance first.` | The prompt box is empty. |
+| `Cannot reach the LLM backend…` | The server is not running, or the Base URL is wrong. |
+| The model list shows **Error loading models** | Same as above; the settings modal could not list models from the Base URL. The stored model is kept until you pick another. |
+| `No usable model…` | No model is selected, or the server does not have it loaded. |
+| `Base URL must be a valid http(s) URL…` | Save rejected the Base URL; use an absolute URL such as `http://localhost:11434`. |
+| `The LLM backend rejected the request as unauthorized…` | The server requires an API key. See [Authentication limitation](#authentication-limitation). |
+| `The selected model rejected the attached image…` | Use a vision model, or turn off **Send Selected Image**. |
+| `The request to the LLM backend timed out…` | Raise **Timeout (s)**, or use a faster model. |
 
 ## Permissions
 
@@ -38,7 +87,7 @@ No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/
 
 ## Settings
 
-Settings are stored per-user through SwarmUI's user-data store. The eight keys and their defaults:
+Settings are stored per-user through SwarmUI's user-data store. **Reset** in the settings modal restores every key to its default. The eight keys and their defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -55,30 +104,83 @@ Settings are stored per-user through SwarmUI's user-data store. The eight keys a
 
 No API key or `Authorization` header is sent with any request. Use a server that does not require authentication — for example Ollama, LM Studio, or llama.cpp's server — or place an authenticating proxy in front of a keyed service. Pointing `baseUrl` directly at a hosted API that requires a key will fail with the backend's own error message.
 
-## Development and testing
+## Development
+
+### Prerequisites
+
+- .NET 8 SDK
+- Node.js 22.18 or newer (the UI tooling runs `.mts` files directly)
+- [`just`](https://github.com/casey/just) 1.56 or newer, for the recipes below
+- Windows recipes run in PowerShell; Unix recipes in `sh` with `rsync` and `perl`
+
+### Layouts
 
 Two layouts build and test identically; the C# project picks one automatically (`UseVendoredSwarmUI` in `PromptEnhance.csproj`):
 
 1. **Host layout** — the checkout lives at `<SwarmUI>/src/Extensions/PromptEnhance` and imports SwarmUI's canonical `SwarmUI.extension.props`. `scripts/run-tests.sh` (requires `SWARMUI_ROOT`) runs every committed gate in this layout.
-2. **Standalone workspace** — the checkout lives anywhere, with the SwarmUI host vendored at `./vendor/SwarmUI`, pinned to the same commit CI builds (`swarmui_pin` in the `justfile`, mirrored by the ref in `.github/workflows/gates.yml`). Set up with `just vendor-sync`. The vendored property group in `PromptEnhance.csproj` mirrors `SwarmUI.extension.props` verbatim; re-check it when the pin is bumped.
+2. **Standalone workspace** — the checkout lives anywhere, with the SwarmUI host vendored at `./vendor/SwarmUI`, pinned to the same commit CI builds (`swarmui_pin` in the `justfile`, mirrored by every SwarmUI ref in `.github/workflows/gates.yml`). Set up with `just vendor-sync`; move the pin only with `just vendor-bump <sha>`. The vendored property group in `PromptEnhance.csproj` mirrors `SwarmUI.extension.props`, and a test fails if they drift.
 
-The individual gates, runnable from the extension directory in either layout:
+### Source layout
+
+| Path | Contents |
+| --- | --- |
+| `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, and API routes. |
+| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, and the error taxonomy. |
+| `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`); every global is `pe`-prefixed or a `promptEnhance*` singleton. |
+| `Assets/*.js` | The exact `tsc` output of `Frontend/`, committed because SwarmUI serves it. Never edit by hand; `npm run build:frontend` regenerates it. |
+| `Assets/promptenhance.css` | Extension styles, using only color tokens every SwarmUI theme defines. |
+| `contracts/pe-contract.json` | Routes, setting defaults, bounds, and apply modes, shared by the C# and TypeScript sides; parity tests pin both to it. |
+| `Tests/*.cs` | C# suite (xunit.v3) against the real SwarmUI assembly. |
+| `Tests/frontend/` | jsdom suite: the emitted `Assets/*.js` plus the host's `util.js`, with the host's request and layout hooks stubbed. |
+| `Tests/ui/` | Playwright browser gates against the real vendored host and a fake OpenAI-compatible backend. |
+| `screenshots/` | README screenshots and their freshness manifest. |
+
+### Gates
+
+`just check` is the gate to run before committing. It runs, in order:
 
 ```sh
-npm ci
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
-npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
 npm run lint                    # Biome, recommended preset; Frontend keeps SwarmUI style (let, ==)
+npm run shots:check             # ./screenshots must be what a green browser run of the current UI produced
+npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
 dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
 dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
 dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
 ```
 
-The C# suite runs on xunit.v3 and is gated on both test platforms; the `justfile` (`backend-test`, `backend-test-mtp`, `backend-test-exe`) is the gate registry.
+The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it. CI (`.github/workflows/gates.yml`) runs the same gates on every push, in both layouts.
 
-Or via [`just`](https://github.com/casey/just): `just vendor-sync` once, then `just check`.
+### Running the real host
 
-Standalone-workspace recipes that run the real host: `just vendor-dev` seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the host's `src/Extensions/`; `just vendor-ci-test` boots the real host with SwarmUI's `--ci_test` mode — any logged error fails the gate with a nonzero exit; `just ui-test` rebuilds the frontend and host, boots the host on port 7898 through Playwright's `webServer`, and drives the Generate tab in headless Chromium (`Tests/ui/*.spec.ts`), writing screenshots to `Tests/ui/shots/`. Run `just ui-install` once to fetch the browser. Tests declared with `test.fail` pin known defects: they pass while the defect is present and fail the gate once it is fixed, so the fix commit flips them to `test`.
+These recipes need the standalone workspace:
+
+| Recipe | What it does |
+| --- | --- |
+| `just vendor-dev` | Seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the vendored host's `src/Extensions/`. |
+| `just vendor-ci-test` | Boots the real host with SwarmUI's `--ci_test` mode; any logged error fails with a nonzero exit. |
+| `just ui-install` | Downloads the Chromium build Playwright drives (once). |
+| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backend on port 7897, and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. |
+| `just readme-shots` | Clears the previous run's README shots, runs `just ui-test`, then copies the new shots into `screenshots/` and records `screenshots/manifest.json`. |
+
+The browser gates cover:
+- the prompt-box geometry: the extension bar and preview never push the prompt boxes under the bottom panel
+- a clean console on startup
+- the preview, append, and Restore flows
+- every settings-modal path: listing models, saving, server-side rejection, an unreachable backend, Reset, and the apply-mode labels
+- the extension's borders and the modal in every registered theme
+
+A test declared with `test.fail` pins a known defect. It passes while the defect is present and fails the gate once the defect is fixed, so the fix commit flips it to `test`.
+
+### README screenshots
+
+`screenshots/manifest.json` records each screenshot's git blob id, the SwarmUI pin, and a digest of everything the screenshots depend on: `Frontend/`, `Assets/`, `Tests/ui/`, and `contracts/`. `npm run shots:check` fails when any of the following holds:
+- a screenshot differs from the one recorded
+- a screenshot is added or missing
+- any of those inputs or the pin changed since the screenshots were taken
+- the README does not show a recorded screenshot
+
+The fix is always `just readme-shots`, then commit `screenshots/`. Screenshots reach `screenshots/` only through that recipe, and only after every browser gate passes.
 
 ## License
 

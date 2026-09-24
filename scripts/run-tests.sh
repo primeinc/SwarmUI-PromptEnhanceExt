@@ -24,6 +24,12 @@ fi
 echo "[run-tests] Frontend build parity (Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output)…"
 ( cd "$DEST" && npm ci && npm run check:frontend-parity )
 
+echo "[run-tests] Lint (Biome)…"
+( cd "$DEST" && npm run lint )
+
+echo "[run-tests] README screenshots match the current UI…"
+( cd "$DEST" && npm run shots:check )
+
 echo "[run-tests] Frontend suite (compiled TypeScript tests against the emitted Assets/*.js, real jsdom)…"
 ( cd "$DEST" && npm run test:frontend )
 
