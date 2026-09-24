@@ -152,17 +152,21 @@ Two layouts build and test identically; the C# project picks one automatically (
 
 ### Gates
 
-`just check` is the gate to run before committing. It runs, in order:
+`just check` is the gate to run before committing. It runs the frontend parity check first, since it rewrites `Assets/*.js`, then everything else in parallel. The three C# runner paths share one build:
 
 ```sh
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
+# then, in parallel:
 npm run lint                    # Biome, recommended preset; Frontend keeps SwarmUI style (let, ==)
 npm run shots:check             # ./screenshots must be what a green browser run of the current UI produced
 npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
-dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
+dotnet build Tests/PromptEnhance.Tests.csproj -c Debug   # one build for the three C# runner paths, which then run in parallel:
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
+dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, stand-alone MTP test executable
 ```
+
+Parallel output is interleaved; `just` names the recipe that failed on its last line.
 
 The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it.
 
