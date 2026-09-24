@@ -9,5 +9,5 @@
         "noEmit": true,
         "types": ["node"]
     },
-    "include": ["*.ts", "../../Frontend/swarm.d.ts"]
+    "include": ["*.ts", "*.mts", "../../Frontend/swarm.d.ts"]
 }
