@@ -31,7 +31,7 @@ This extension makes outbound web connections **only to the base URL configured 
 | Request | When | What |
 | --- | --- | --- |
 | `GET {baseUrl}/v1/models` | Before every model-list or enhance call | Reachability probe. Only transport failures (connection refused, DNS) count as unreachable; no response within 3 seconds counts as reachable and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
-| `GET {baseUrl}/v1/models` | When the settings panel loads or refreshes the model list | Model discovery for the model dropdown. |
+| `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. |
 | `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
 
 No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested. There is no telemetry, no update check, and no analytics of any kind.
@@ -67,7 +67,8 @@ The individual gates, runnable from the extension directory in either layout:
 ```sh
 npm ci
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
-npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js, real jsdom
+npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
+npm run lint                    # Biome, recommended preset; Frontend keeps SwarmUI style (let, ==)
 dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
 dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
 dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable

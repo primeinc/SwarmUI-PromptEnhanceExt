@@ -40,13 +40,11 @@
     <ItemGroup>
         <Compile Remove="Tests/**/*.cs" />
         <Compile Remove="vendor/**/*.cs" />
-        <Content Remove="vendor/**" />
-        <None Remove="vendor/**" />
-        <!-- Keep the contract file out of the Web SDK's content glob: it must exist
-             exactly once, at the repo root, or the tests' repo-root walk-up finds a
-             stale copy inside build output. -->
-        <Content Remove="contracts/**" />
-        <None Remove="contracts/**" />
+        <!-- As SwarmUI.extension.props: SwarmUI serves extension assets from the source
+             tree, so nothing is copied to build output. The Web SDK content glob would
+             otherwise copy the repo's JSON files, including Tests/bin, into bin. -->
+        <None Remove="**" />
+        <Content Remove="**" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(UseVendoredSwarmUI)' == 'true'">

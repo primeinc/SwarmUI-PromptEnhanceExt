@@ -31,6 +31,10 @@ frontend-build:
 frontend-parity:
   npm run check:frontend-parity
 
+# Lint TypeScript sources and tests (Biome)
+lint:
+  npm run lint
+
 # Run frontend tests (jsdom)
 frontend-test:
   npm run test:frontend
@@ -58,14 +62,14 @@ vendor-sync:
 vendor-dev: vendor-sync
   if (-not (Test-Path 'vendor/SwarmUI/Data')) { New-Item -ItemType Directory -Force 'vendor/SwarmUI/Data' | Out-Null }
   if (-not (Test-Path 'vendor/SwarmUI/Data/Settings.fds')) { Copy-Item 'scripts/vendor-dev-settings.fds' 'vendor/SwarmUI/Data/Settings.fds' }
-  robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
+  robocopy . 'vendor/SwarmUI/src/Extensions/PromptEnhance' /MIR /XD .git vendor node_modules bin obj out .vs .idea .playwright-mcp .git-recovery .copilot-tracking shots test-results /NFL /NDL /NJH /NJS ; if ($LASTEXITCODE -ge 8) { exit 1 } else { exit 0 }
 
 # Make the vendored host a runnable dev install (see the [windows] variant)
 [unix]
 vendor-dev: vendor-sync
   mkdir -p vendor/SwarmUI/Data
   if [ ! -e vendor/SwarmUI/Data/Settings.fds ]; then cp scripts/vendor-dev-settings.fds vendor/SwarmUI/Data/Settings.fds; fi
-  rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
+  rsync -a --delete --exclude .git --exclude vendor --exclude node_modules --exclude bin --exclude obj --exclude out --exclude .vs --exclude .idea --exclude .playwright-mcp --exclude .git-recovery --exclude .copilot-tracking --exclude shots --exclude test-results ./ vendor/SwarmUI/src/Extensions/PromptEnhance/
 
 # Bump the SwarmUI pin in every mirror in one recipe (justfile + gates.yml), resync vendor, rerun
 # the gates including the live host boot. Not transactional: a partial failure leaves the mirrors
@@ -151,7 +155,7 @@ build: frontend-build backend-build
 test: frontend-test backend-test backend-test-mtp backend-test-exe
 
 # Validation gate used before commit
-check: frontend-parity test
+check: frontend-parity lint test
 
 # Full setup + validation for a fresh clone
 dev: install check

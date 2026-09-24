@@ -1,287 +1,256 @@
 /**
- * Generate-tab integration for the PromptEnhance extension: the Enhance
- * button bar, the image-context adapter, and the prompt-mutation policy
- * (preview / append / replace-with-restore).
+ * Generate-tab integration for the PromptEnhance extension: the Enhance bar, the preview panel,
+ * the image-context adapter, and the prompt-mutation policy (preview / append / replace-with-restore).
  *
- * AUTHORITATIVE SOURCE: Frontend/promptenhance.ts. The committed
- * Assets/promptenhance.js is tsc build output — do not hand-edit it.
+ * AUTHORITATIVE SOURCE: Frontend/promptenhance.ts. The committed Assets/promptenhance.js is tsc
+ * build output — do not hand-edit it.
  */
 
-window.PromptEnhance = window.PromptEnhance || {};
-PromptEnhance.initialized = false;
-PromptEnhance.enhancing = false;
-PromptEnhance.lastOriginal = null;
-PromptEnhance.pending = null;
+/** The Enhance controls on the Generate tab and the prompt edits they make. */
+class PromptEnhanceGenTab {
+    /** True while an enhancement round-trip is in flight; guards against re-entry. */
+    enhancing: boolean = false;
 
-/** DOM adapter: the Generate-tab prompt textarea, or null when the tab isn't mounted. */
-function pePromptBox(): HTMLTextAreaElement | null {
-    return document.getElementById('alt_prompt_textbox') as HTMLTextAreaElement | null;
-}
+    /** The earliest pre-enhancement prompt, stashed once per replace cycle. Never overwritten while non-null; cleared only by Restore. */
+    lastOriginal: string | null = null;
 
-/** Writes the prompt textarea and notifies SwarmUI through `triggerChangeFor` (site.js). */
-function peSetPrompt(text: string): void {
-    const box = pePromptBox();
-    if (!box) {
-        return;
-    }
-    box.value = text;
-    if (typeof window.triggerChangeFor === 'function') {
-        window.triggerChangeFor(box);
-    }
-    box.focus();
-}
+    /** A preview-mode result awaiting Apply or Cancel. */
+    pending: PEPending | null = null;
 
-function peSetLoading(on: boolean): void {
-    const btn = document.getElementById('pe_enhance_btn') as HTMLButtonElement | null;
-    const spinner = document.getElementById('pe_enhance_loading');
-    if (btn) {
-        btn.disabled = on;
-        btn.classList.toggle('loading', on);
-    }
-    if (spinner) {
-        spinner.style.display = on ? 'inline-block' : 'none';
-    }
-}
+    /** The Enhance button bar, once mounted. */
+    bar: HTMLElement | null = null;
 
-/** Surfaces an error to the user via SwarmUI's `showError` banner, falling back to console + alert. */
-function peShowError(message: string): void {
-    try {
-        if (typeof window.showError === 'function') {
-            window.showError(message);
-            return;
+    /** The preview panel, once mounted. */
+    preview: HTMLElement | null = null;
+
+    /** Settles when session-ready startup (mount, settings load) has finished. */
+    ready: Promise<void> | null = null;
+
+    /** The Generate-tab prompt textarea. */
+    promptBox(): HTMLTextAreaElement {
+        return getRequiredElementById('alt_prompt_textbox') as HTMLTextAreaElement;
+    }
+
+    /** Writes the prompt textarea and notifies SwarmUI of the change. */
+    setPrompt(text: string): void {
+        let box = this.promptBox();
+        box.value = text;
+        triggerChangeFor(box);
+        box.focus();
+    }
+
+    /** Shows or clears the in-flight state on the Enhance button. */
+    setLoading(on: boolean): void {
+        let button = getRequiredElementById('pe_enhance_btn') as HTMLButtonElement;
+        button.disabled = on;
+        getRequiredElementById('pe_enhance_loading').style.display = on ? 'inline-flex' : 'none';
+    }
+
+    /** Surfaces an error through SwarmUI's error banner, falling back to console and alert if the banner itself fails. */
+    showError(message: string): void {
+        try {
+            showError(message);
         }
-    } catch (err) {
-        console.error('[PromptEnhance] host showError failed:', err);
-    }
-    console.error('[PromptEnhance]', message);
-    alert(message);
-}
-
-/** Reads the currently selected Generate-tab image into a base64 part. Returns null when no image is selected; throws when an image exists but cannot be read. */
-async function peGetSelectedImage(): Promise<PEImagePart | null> {
-    const img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
-        || document.querySelector<HTMLImageElement>('#current_image img');
-    if (!img || !img.src) {
-        return null;
-    }
-    try {
-        const resp = await fetch(img.src);
-        const blob = await resp.blob();
-        return await new Promise<PEImagePart>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = String(reader.result).split(',')[1];
-                if (!base64) {
-                    reject(new Error('The selected image could not be read.'));
-                    return;
-                }
-                resolve({
-                    data: base64,
-                    mediaType: blob.type || 'image/jpeg'
-                });
-            };
-            reader.onerror = () => reject(new Error('The selected image could not be read.'));
-            reader.readAsDataURL(blob);
-        });
-    } catch (err) {
-        throw new Error('Could not attach the selected image: ' + peErrorText(err));
-    }
-}
-
-/** Transport adapter: one PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport-level failures resolve (never reject). */
-function peEnhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
-    return new Promise((resolve) => {
-        genericRequest(PE_ROUTES.run, payload,
-            (data) => resolve(peAdaptEnhanceResult(data)),
-            0,
-            (err) => resolve({ ok: false, error: peErrorText(err) })
-        );
-    });
-}
-
-/** Prompt-mutation policy: preview shows an Apply/Cancel panel; append keeps the original inline; replace_with_restore swaps the box and stashes the original for Restore. */
-function peApplyEnhancement(original: string, enhanced: string): void {
-    const mode = PromptEnhance.settings?.replaceMode || 'preview';
-    if (mode === 'append') {
-        peSetPrompt(`${original}\n\n---\n\n${enhanced}`);
-        peHideRestore();
-        return;
-    }
-    if (mode === 'replace_with_restore') {
-        if (PromptEnhance.lastOriginal === null) {
-            PromptEnhance.lastOriginal = original;
+        catch (err) {
+            console.error('[PromptEnhance] host showError failed:', err);
+            console.error('[PromptEnhance]', message);
+            alert(message);
         }
-        peSetPrompt(enhanced);
-        peShowRestore();
-        return;
     }
-    peShowPreview(original, enhanced);
-}
 
-/** Re-offsets SwarmUI's prompt region after the extension changes the height of `#alt_prompt_extra_area` (layout.js `altPromptSizeHandle`). */
-function peRelayout(): void {
-    if (typeof genTabLayout !== 'undefined') {
+    /** Re-offsets SwarmUI's prompt region after the extension changes the height of `#alt_prompt_extra_area`. */
+    relayout(): void {
         genTabLayout.altPromptSizeHandle();
     }
-}
 
-function peShowPreview(original: string, enhanced: string): void {
-    PromptEnhance.pending = { original, enhanced };
-    const preview = document.getElementById('pe_preview');
-    const text = document.getElementById('pe_preview_text');
-    if (preview && text) {
-        text.textContent = enhanced;
-        preview.style.display = 'block';
-        peRelayout();
+    /** Reads the currently selected Generate-tab image into a base64 part. Returns null when no image is selected; throws when an image exists but cannot be read. */
+    async getSelectedImage(): Promise<PEImagePart | null> {
+        let img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
+            || document.querySelector<HTMLImageElement>('#current_image img');
+        if (!img?.src) {
+            return null;
+        }
+        try {
+            let resp = await fetch(img.src);
+            let blob = await resp.blob();
+            return await new Promise<PEImagePart>((resolve, reject) => {
+                let reader = new FileReader();
+                reader.onloadend = () => {
+                    let base64 = `${reader.result}`.split(',')[1];
+                    if (!base64) {
+                        reject(new Error('The selected image could not be read.'));
+                        return;
+                    }
+                    resolve({ data: base64, mediaType: blob.type || 'image/jpeg' });
+                };
+                reader.onerror = () => reject(new Error('The selected image could not be read.'));
+                reader.readAsDataURL(blob);
+            });
+        }
+        catch (err) {
+            throw new Error(`Could not attach the selected image: ${peErrorText(err)}`);
+        }
     }
-}
 
-function peHidePreview(): void {
-    PromptEnhance.pending = null;
-    const preview = document.getElementById('pe_preview');
-    if (preview) {
-        preview.style.display = 'none';
-        peRelayout();
+    /** One PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport failures resolve, never reject. */
+    enhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
+        return new Promise((resolve) => {
+            genericRequest(PE_ROUTES.run, payload,
+                (data) => resolve(peAdaptEnhanceResult(data)),
+                0,
+                (err) => resolve({ ok: false, error: peErrorText(err) }));
+        });
     }
-}
 
-function peShowRestore(): void {
-    const btn = document.getElementById('pe_restore_btn');
-    if (btn) {
-        btn.style.display = 'inline-block';
-        peRelayout();
+    /** Prompt-mutation policy: preview shows an Apply/Cancel panel; append keeps the original inline; replace_with_restore swaps the prompt and stashes the original for Restore. */
+    applyEnhancement(original: string, enhanced: string): void {
+        let mode = promptEnhanceSettings.effective().replaceMode;
+        if (mode == 'append') {
+            this.setPrompt(`${original}\n\n---\n\n${enhanced}`);
+            this.hideRestore();
+            return;
+        }
+        if (mode == 'replace_with_restore') {
+            if (this.lastOriginal == null) {
+                this.lastOriginal = original;
+            }
+            this.setPrompt(enhanced);
+            this.showRestore();
+            return;
+        }
+        this.showPreview(original, enhanced);
     }
-}
 
-function peHideRestore(): void {
-    const btn = document.getElementById('pe_restore_btn');
-    if (btn) {
-        btn.style.display = 'none';
-        peRelayout();
+    /** Shows a preview-mode result for Apply or Cancel. */
+    showPreview(original: string, enhanced: string): void {
+        this.pending = { original, enhanced };
+        getRequiredElementById('pe_preview_text').textContent = enhanced;
+        getRequiredElementById('pe_preview').style.display = 'block';
+        this.relayout();
     }
-}
 
-/** The Enhance click flow: validate input, optionally attach the selected image, run the backend round-trip, apply the result. Reentrancy is guarded; the loading state clears on every path. */
-async function peHandleEnhance(): Promise<void> {
-    if (PromptEnhance.enhancing) {
-        return;
+    /** Hides the preview panel and drops its pending result. */
+    hidePreview(): void {
+        this.pending = null;
+        getRequiredElementById('pe_preview').style.display = 'none';
+        this.relayout();
     }
-    const box = pePromptBox();
-    if (!box) {
-        return;
+
+    /** Shows the Restore button. */
+    showRestore(): void {
+        getRequiredElementById('pe_restore_btn').style.display = 'inline-block';
+        this.relayout();
     }
-    const original = box.value.trim();
-    if (!original) {
-        peShowError('Type a prompt to enhance first.');
-        return;
+
+    /** Hides the Restore button. */
+    hideRestore(): void {
+        getRequiredElementById('pe_restore_btn').style.display = 'none';
+        this.relayout();
     }
-    PromptEnhance.enhancing = true;
-    peSetLoading(true);
-    peHidePreview();
-    try {
-        const payload: PEEnhancePayload = { prompt: original };
-        if (PromptEnhance.settings?.sendSelectedImage) {
-            const image = await peGetSelectedImage();
-            if (image) {
-                payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType }];
+
+    /** Applies the pending preview result, stashing the original for Restore. */
+    applyPreview(): void {
+        if (this.pending) {
+            if (this.lastOriginal == null) {
+                this.lastOriginal = this.pending.original;
+            }
+            this.setPrompt(this.pending.enhanced);
+            this.showRestore();
+        }
+        this.hidePreview();
+    }
+
+    /** Puts the stashed original prompt back. */
+    restore(): void {
+        if (this.lastOriginal != null) {
+            this.setPrompt(this.lastOriginal);
+            this.lastOriginal = null;
+        }
+        this.hideRestore();
+    }
+
+    /** The Enhance click flow: validate input, optionally attach the selected image, run the backend round-trip, apply the result. Re-entry is guarded; the loading state clears on every path. */
+    async handleEnhance(): Promise<void> {
+        if (this.enhancing) {
+            return;
+        }
+        let original = this.promptBox().value.trim();
+        if (!original) {
+            this.showError('Type a prompt to enhance first.');
+            return;
+        }
+        this.enhancing = true;
+        this.setLoading(true);
+        this.hidePreview();
+        try {
+            let payload: PEEnhancePayload = { prompt: original };
+            if (promptEnhanceSettings.effective().sendSelectedImage) {
+                let image = await this.getSelectedImage();
+                if (image) {
+                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType }];
+                }
+            }
+            let result = await this.enhanceRequest(payload);
+            if (result.ok) {
+                this.applyEnhancement(original, result.response);
+            }
+            else {
+                this.showError(`PromptEnhance: ${result.error}`);
             }
         }
-        const result = await peEnhanceRequest(payload);
-        if (result.ok) {
-            peApplyEnhancement(original, result.response);
-        } else {
-            peShowError('PromptEnhance: ' + result.error);
+        catch (err) {
+            this.showError(`PromptEnhance: ${peErrorText(err)}`);
         }
-    } catch (err) {
-        peShowError('PromptEnhance: ' + peErrorText(err));
-    } finally {
-        PromptEnhance.enhancing = false;
-        peSetLoading(false);
+        finally {
+            this.enhancing = false;
+            this.setLoading(false);
+        }
+    }
+
+    /**
+     * Mounts the Enhance bar and preview panel at the top of `#alt_prompt_extra_area`, the one part of
+     * SwarmUI's prompt region whose height the region offset accounts for. Idempotent.
+     */
+    mount(): void {
+        if (this.bar) {
+            return;
+        }
+        let area = getRequiredElementById('alt_prompt_extra_area');
+        this.bar = createDiv('pe_button_bar', 'pe-button-bar', `
+            <button type="button" class="basic-button pe-enhance-btn" id="pe_enhance_btn">Enhance Prompt</button>
+            <button type="button" class="basic-button" id="pe_settings_button" title="PromptEnhance Settings">&#x2699;&#xFE0F;</button>
+            <span class="pe-loading" id="pe_enhance_loading" style="display: none;"><span></span><span></span><span></span></span>
+            <button type="button" class="basic-button" id="pe_restore_btn" style="display: none;">Restore Previous Prompt</button>`);
+        this.preview = createDiv('pe_preview', 'pe-preview', `
+            <div class="pe-preview-label">Enhanced preview — nothing has changed yet:</div>
+            <div class="pe-preview-text" id="pe_preview_text"></div>
+            <div class="pe-preview-actions">
+                <button type="button" class="basic-button" id="pe_preview_apply">Apply</button>
+                <button type="button" class="basic-button" id="pe_preview_cancel">Cancel</button>
+            </div>`);
+        this.preview.style.display = 'none';
+        area.insertBefore(this.preview, area.firstChild);
+        area.insertBefore(this.bar, area.firstChild);
+        getRequiredElementById('pe_enhance_btn').addEventListener('click', () => this.handleEnhance());
+        getRequiredElementById('pe_settings_button').addEventListener('click', () => promptEnhanceSettings.open());
+        getRequiredElementById('pe_restore_btn').addEventListener('click', () => this.restore());
+        getRequiredElementById('pe_preview_apply').addEventListener('click', () => this.applyPreview());
+        getRequiredElementById('pe_preview_cancel').addEventListener('click', () => this.hidePreview());
+        this.relayout();
+    }
+
+    /** Session-ready startup: mount the controls and load settings. */
+    async start(): Promise<void> {
+        this.mount();
+        await promptEnhanceSettings.load();
     }
 }
 
-/**
- * Injects the button bar and preview panel at the top of `#alt_prompt_extra_area`, the one part of
- * SwarmUI's prompt region whose height the region offset accounts for. Idempotent.
- */
-function peAddPromptButtons(): void {
-    const area = document.getElementById('alt_prompt_extra_area');
-    if (!area || document.getElementById('pe_button_bar')) {
-        return;
-    }
-    const bar = document.createElement('div');
-    bar.id = 'pe_button_bar';
-    bar.className = 'promptenhance pe-button-bar';
-    bar.innerHTML = `
-        <button type="button" class="pe-enhance-btn" id="pe_enhance_btn">✨ Enhance Prompt</button>
-        <button type="button" class="pe-settings-button" id="pe_settings_button" title="PromptEnhance Settings">⚙️</button>
-        <span class="pe-loading" id="pe_enhance_loading" style="display:none"><span></span><span></span><span></span></span>
-        <button type="button" class="pe-restore-btn" id="pe_restore_btn" style="display:none">↺ Restore Previous Prompt</button>
-    `;
-    const preview = document.createElement('div');
-    preview.id = 'pe_preview';
-    preview.className = 'promptenhance pe-preview';
-    preview.style.display = 'none';
-    preview.innerHTML = `
-        <div class="pe-preview-label">Enhanced preview — nothing has changed yet:</div>
-        <div class="pe-preview-text" id="pe_preview_text"></div>
-        <div class="pe-preview-actions">
-            <button type="button" class="pe-preview-apply" id="pe_preview_apply">Apply</button>
-            <button type="button" class="pe-preview-cancel" id="pe_preview_cancel">Cancel</button>
-        </div>
-    `;
-
-    area.insertBefore(preview, area.firstChild);
-    area.insertBefore(bar, area.firstChild);
-    peRelayout();
-
-    bar.querySelector<HTMLButtonElement>('#pe_enhance_btn')!.addEventListener('click', peHandleEnhance);
-    bar.querySelector<HTMLButtonElement>('#pe_settings_button')!.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        PromptEnhance.openSettingsPanel?.();
-    });
-    bar.querySelector<HTMLButtonElement>('#pe_restore_btn')!.addEventListener('click', () => {
-        if (PromptEnhance.lastOriginal !== null && PromptEnhance.lastOriginal !== undefined) {
-            peSetPrompt(PromptEnhance.lastOriginal);
-            PromptEnhance.lastOriginal = null;
-        }
-        peHideRestore();
-    });
-    preview.querySelector<HTMLButtonElement>('#pe_preview_apply')!.addEventListener('click', () => {
-        if (PromptEnhance.pending) {
-            if (PromptEnhance.lastOriginal === null) {
-                PromptEnhance.lastOriginal = PromptEnhance.pending.original;
-            }
-            peSetPrompt(PromptEnhance.pending.enhanced);
-            peShowRestore();
-        }
-        peHidePreview();
-    });
-    preview.querySelector<HTMLButtonElement>('#pe_preview_cancel')!.addEventListener('click', peHidePreview);
-}
-
-/** Mounts the Enhance UI and loads settings once SwarmUI has a session and has laid out the Generate tab. Runs once. */
-async function peOnSessionReady(): Promise<void> {
-    if (PromptEnhance.initialized) {
-        return;
-    }
-    PromptEnhance.initialized = true;
-    peAddPromptButtons();
-    try {
-        if (PromptEnhance.loadSettings) {
-            await PromptEnhance.loadSettings();
-        }
-    } catch (err) {
-        console.error('[PromptEnhance] settings load failed (continuing):', err);
-    }
-    try {
-        PromptEnhance.fetchModels?.();
-    } catch (err) {
-        console.error('[PromptEnhance] model fetch failed (continuing):', err);
-    }
-}
+/** Shared Generate-tab integration. */
+let promptEnhanceGenTab = new PromptEnhanceGenTab();
 
 sessionReadyCallbacks.push(() => {
-    PromptEnhance.ready = peOnSessionReady();
+    if (!promptEnhanceGenTab.ready) {
+        promptEnhanceGenTab.ready = promptEnhanceGenTab.start();
+    }
 });

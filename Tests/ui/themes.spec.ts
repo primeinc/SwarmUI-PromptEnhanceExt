@@ -3,8 +3,8 @@ import * as path from 'node:path';
 
 const shotDir = path.join(__dirname, 'shots', 'themes');
 
-/** Elements the extension draws a 1px border on, opened into view before measuring. */
-const borderedSelectors = ['#pe_enhance_btn', '#pe_restore_btn', '#pe_preview', '#pe_preview_text', '#pe_settings_panel'];
+/** Elements promptenhance.css draws a 1px border on, opened into view before measuring. Buttons and the settings modal carry SwarmUI's own styling. */
+const borderedSelectors = ['#pe_preview', '#pe_preview_text'];
 
 /** Every registered theme id mapped to the stylesheet paths it loads (GetUserSettings). */
 async function registeredThemes(page: Page): Promise<Record<string, string[]>> {
@@ -33,11 +33,11 @@ async function registeredThemes(page: Page): Promise<Record<string, string[]>> {
 async function applyTheme(page: Page, theme: string): Promise<string[]> {
     return page.evaluate(async (theme) => {
         const selector = document.getElementById('usersettings_theme') as HTMLSelectElement | null;
-        if (!selector || !window.triggerChangeFor) {
-            throw new Error('theme selector or triggerChangeFor missing');
+        if (!selector) {
+            throw new Error('theme selector missing');
         }
         selector.value = theme;
-        window.triggerChangeFor(selector);
+        triggerChangeFor(selector);
         const links = [...document.querySelectorAll<HTMLLinkElement>('link.theme_sheet_header')];
         await Promise.all(links.map((link) => link.sheet ? null : new Promise((resolve, reject) => {
             link.addEventListener('load', resolve);
@@ -47,7 +47,7 @@ async function applyTheme(page: Page, theme: string): Promise<string[]> {
     }, theme);
 }
 
-/** Opens every extension surface that carries a border: preview, Restore, settings panel. */
+/** Opens the preview and Restore so every extension surface is on screen. */
 async function openBorderedSurfaces(page: Page): Promise<void> {
     await page.evaluate(() => {
         const preview = document.getElementById('pe_preview');
@@ -59,7 +59,6 @@ async function openBorderedSurfaces(page: Page): Promise<void> {
         text.textContent = 'a weathered lighthouse at dusk';
         preview.style.display = 'block';
         restore.style.display = 'inline-block';
-        PromptEnhance.openSettingsPanel?.();
     });
 }
 
@@ -87,4 +86,17 @@ test('every extension border renders in every registered theme', async ({ page }
         await page.screenshot({ path: path.join(shotDir, `${theme}.png`) });
     }
     expect(missing).toEqual([]);
+});
+
+test('the settings modal renders in every registered theme', async ({ page }) => {
+    await page.goto('/Text2Image');
+    await expect(page.locator('#pe_settings_button')).toBeVisible();
+    const themes = await registeredThemes(page);
+    await page.locator('#pe_settings_button').click();
+    const modal = page.locator('#pe_settings_modal .modal-content');
+    await expect(modal).toBeVisible();
+    for (const [theme, cssPaths] of Object.entries(themes)) {
+        await expect.poll(() => applyTheme(page, theme), { message: `theme ${theme} stylesheets load` }).toEqual(cssPaths);
+        await modal.screenshot({ path: path.join(shotDir, `modal-${theme}.png`) });
+    }
 });

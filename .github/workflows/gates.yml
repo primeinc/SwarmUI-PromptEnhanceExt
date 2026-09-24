@@ -22,11 +22,18 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
+      # The jsdom suite loads the host's util.js from the vendored layout.
+      - uses: actions/checkout@v4
+        with:
+          repository: mcmonkeyprojects/SwarmUI
+          ref: 96a4c3d14a31776bab5e3300301e078c15875f22
+          path: vendor/SwarmUI
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci
       - run: npm run check:frontend-parity
+      - run: npm run lint
       - run: npm run test:frontend
 
   csharp:

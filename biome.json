@@ -1,7 +1,7 @@
 {
     "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
     "files": {
-        "includes": ["Frontend/**/*.ts", "Tests/**/*.ts", "Tests/**/*.mts", "!!**/vendor", "!!**/node_modules", "!!**/out", "!!**/test-results"]
+        "includes": ["Frontend/**/*.ts", "Tests/**/*.ts", "Tests/**/*.mts", "!!**/vendor", "!!**/node_modules", "!!**/bin", "!!**/obj", "!!**/out", "!!**/test-results"]
     },
     "formatter": {
         "enabled": false
@@ -11,5 +11,33 @@
         "rules": {
             "preset": "recommended"
         }
-    }
+    },
+    "overrides": [
+        {
+            "includes": ["Frontend/**"],
+            "linter": {
+                "rules": {
+                    "correctness": {
+                        "noUnusedVariables": "off"
+                    },
+                    "style": {
+                        "useConst": "off"
+                    },
+                    "suspicious": {
+                        "noDoubleEquals": "off"
+                    }
+                }
+            }
+        },
+        {
+            "includes": ["Tests/**"],
+            "linter": {
+                "rules": {
+                    "style": {
+                        "noNonNullAssertion": "off"
+                    }
+                }
+            }
+        }
+    ]
 }

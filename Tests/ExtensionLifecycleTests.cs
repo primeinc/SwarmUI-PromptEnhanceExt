@@ -11,10 +11,7 @@ public class ExtensionLifecycleTests
         extension.OnPreInit();
 
         Xunit.Assert.Equal("MIT", extension.License);
-        Xunit.Assert.Equal("Assets/contracts.js", extension.ScriptFiles[0]);
-        Xunit.Assert.Contains("Assets/promptenhance.js", extension.ScriptFiles);
-        Xunit.Assert.Contains("Assets/settings.js", extension.ScriptFiles);
-        Xunit.Assert.Contains("Assets/promptenhance.css", extension.StyleSheetFiles);
-        Xunit.Assert.Contains("Assets/settings.css", extension.StyleSheetFiles);
+        Xunit.Assert.Equal(["Assets/contracts.js", "Assets/settings.js", "Assets/promptenhance.js"], extension.ScriptFiles);
+        Xunit.Assert.Equal(["Assets/promptenhance.css"], extension.StyleSheetFiles);
     }
 }
