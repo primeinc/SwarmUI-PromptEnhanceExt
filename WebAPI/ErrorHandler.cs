@@ -56,7 +56,7 @@ public static class ErrorHandler
             PromptEnhanceErrorCategory.HttpError =>
                 "The LLM backend returned an error response.",
             PromptEnhanceErrorCategory.Authentication =>
-                "The LLM backend rejected the request as unauthorized. This extension sends no API key; point the Base URL at an OpenAI-compatible server that does not require authentication (a local server such as Ollama, LM Studio, or llama.cpp).",
+                "The LLM backend rejected the request as unauthorized. Set or correct its API key under User → API Keys → PromptEnhance LLM Server.",
             _ => "Something went wrong talking to the LLM backend."
         };
         return string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage}\n\nDetail: {Excerpt(detail)}";

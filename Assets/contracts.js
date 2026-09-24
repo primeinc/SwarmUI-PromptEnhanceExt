@@ -16,6 +16,8 @@ let PE_ROUTES = {
     saveSettings: 'SavePromptEnhanceSettings',
     resetSettings: 'ResetPromptEnhanceSettings'
 };
+/** Key type of the backend API key in SwarmUI's User → API Keys table, mirrored from contracts/pe-contract.json. */
+let PE_API_KEY_TYPE = 'promptenhance_api';
 /** Numeric input bounds, mirrored from contracts/pe-contract.json. */
 let PE_LIMITS = {
     timeoutSeconds: { min: 1, max: 3600 },

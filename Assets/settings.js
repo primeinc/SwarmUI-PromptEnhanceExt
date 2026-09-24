@@ -180,7 +180,8 @@ class PromptEnhanceSettings {
     buildModal() {
         let defaults = PE_DEFAULT_SETTINGS;
         let field = (id, name, type, description, input) => makeGenericPopover(id, name, type, description, '') + input;
-        let body = field('pe_base_url', 'Base URL', 'text', 'OpenAI-compatible server. A root URL or one ending in /v1 both work. No API key is sent, so the server must not require authentication.', makeTextInput(null, 'pe_base_url', '', 'Base URL', '', defaults.baseUrl, 'normal', defaults.baseUrl, false, false, true))
+        let body = field('pe_base_url', 'Base URL', 'text', 'OpenAI-compatible server. A root URL or one ending in /v1 both work. If the server needs an API key, set it under User → API Keys.', makeTextInput(null, 'pe_base_url', '', 'Base URL', '', defaults.baseUrl, 'normal', defaults.baseUrl, false, false, true))
+            + '<div class="pe-api-key-row">API Key: <span id="pe_api_key_status"></span> <a href="#" id="pe_api_key_link">Set in User → API Keys</a></div>'
             + field('pe_model_select', 'Model', 'dropdown', 'The model the backend runs. The list comes from the backend at Base URL.', makeDropdownInput(null, 'pe_model_select', '', 'Model', '', [], '', false, true))
             + '<button type="button" class="basic-button" id="pe_refresh_models">Refresh Models</button>'
             + field('pe_system_prompt', 'System Prompt', 'text', 'Instruction sent ahead of the prompt to enhance.', makeTextInput(null, 'pe_system_prompt', '', 'System Prompt', '', defaults.systemPrompt, 'big', '', false, false, true))
@@ -200,12 +201,40 @@ class PromptEnhanceSettings {
             + modalFooter());
         let modal = getRequiredElementById('pe_settings_modal');
         getRequiredElementById('pe_refresh_models').addEventListener('click', () => this.fetchModels());
+        getRequiredElementById('pe_api_key_link').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.openApiKeys();
+        });
         getRequiredElementById('pe_reset_btn').addEventListener('click', () => this.reset());
         getRequiredElementById('pe_close_btn').addEventListener('click', () => this.close());
         getRequiredElementById('pe_save_btn').addEventListener('click', () => this.save());
         return modal;
     }
-    /** Opens the settings modal with the current settings and a fresh model list. */
+    /** Shows whether a backend API key is saved, from SwarmUI's GetAPIKeyStatus route. The key itself never reaches the browser. */
+    fetchApiKeyStatus() {
+        let status = document.getElementById('pe_api_key_status');
+        if (!status) {
+            return;
+        }
+        status.textContent = '…';
+        genericRequest('GetAPIKeyStatus', { keyType: PE_API_KEY_TYPE }, (data) => {
+            status.textContent = peIsRecord(data) && typeof data.status == 'string' ? data.status : 'unknown';
+        }, 0, (err) => {
+            status.textContent = `unknown (${peErrorText(err)})`;
+        });
+    }
+    /** Closes the modal and shows this extension's row in SwarmUI's User → API Keys table. */
+    openApiKeys() {
+        this.close();
+        getRequiredElementById('usersettingstabbutton').click();
+        getRequiredElementById('userinfotabbutton').click();
+        let input = document.getElementById('promptenhance_api_key');
+        if (input) {
+            input.scrollIntoView({ block: 'center' });
+            input.focus();
+        }
+    }
+    /** Opens the settings modal with the current settings, a fresh model list, and the API key status. */
     open() {
         if (!this.modal) {
             this.modal = this.buildModal();
@@ -213,6 +242,7 @@ class PromptEnhanceSettings {
         this.populateForm();
         this.setStatus('', '');
         this.fetchModels();
+        this.fetchApiKeyStatus();
         $(this.modal).modal('show');
     }
     /** Closes the settings modal. */

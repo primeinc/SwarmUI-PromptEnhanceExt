@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -146,6 +147,9 @@ internal sealed class MockHttpServer : IDisposable
     private readonly int _delayMs;
     private volatile bool _stop;
 
+    /// <summary>The header block (request line plus headers) of every request received, in arrival order.</summary>
+    public readonly ConcurrentQueue<string> RequestHeads = new();
+
     public MockHttpServer(int status, string reason, string body, int delayMs = 0)
     {
         _status = status;
@@ -214,6 +218,9 @@ internal sealed class MockHttpServer : IDisposable
                 catch
                 {
                 }
+                string raw = Encoding.ASCII.GetString(received.ToArray());
+                int end = raw.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                RequestHeads.Enqueue(end >= 0 ? raw[..end] : raw);
 
                 if (_delayMs > 0)
                 {

@@ -7,6 +7,11 @@
     margin-bottom: 0.35rem;
 }
 
+.pe-api-key-row {
+    margin: 0.25rem 0 0.5rem;
+    font-size: 0.9em;
+}
+
 .pe-enhance-btn:disabled {
     opacity: 0.6;
     cursor: default;

@@ -18,6 +18,7 @@
     "Authentication": "authentication",
     "Generic": "generic"
   },
+  "apiKeyType": "promptenhance_api",
   "store": {
     "dataname": "promptenhance",
     "name": "config"

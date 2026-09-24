@@ -61,15 +61,6 @@ public class ErrorHandlerTests
         Xunit.Assert.Equal("short", excerpt);
     }
 
-    [Xunit.Fact]
-    public void Format_Authentication_DoesNotInstructSettingAnApiKey()
-    {
-        string message = WebAPI.ErrorHandler.Format(WebAPI.PromptEnhanceErrorCategory.Authentication);
-
-        Xunit.Assert.DoesNotContain("Set the API key", message, System.StringComparison.OrdinalIgnoreCase);
-        Xunit.Assert.Contains("does not require authentication", message, System.StringComparison.OrdinalIgnoreCase);
-    }
-
     [Xunit.Theory]
     [Xunit.InlineData("{\"error\":{\"message\":\"This model does not support image input.\",\"type\":\"invalid_request_error\",\"code\":null}}")]
     [Xunit.InlineData("{\"error\":{\"message\":\"Model does not support images.\"}}")]

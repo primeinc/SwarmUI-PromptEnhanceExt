@@ -35,6 +35,7 @@ const UTIL_SRC = readHostUtilJs();
 
 interface PEContractFile {
     routes: Record<string, string>;
+    apiKeyType: string;
     errorCategories: Record<string, string>;
     store: { dataname: string; name: string };
     settings: Record<string, { type: string; default: unknown; min?: number; max?: number; enum?: string[] }>;
@@ -109,6 +110,7 @@ interface PEGlobals {
     genTab: PEGenTabSurface;
     settings: PESettingsSurface;
     PE_ROUTES: PERoutes;
+    PE_API_KEY_TYPE: string;
     PE_LIMITS: PELimits;
     PE_REPLACE_MODES: readonly PEReplaceMode[];
     PE_DEFAULT_SETTINGS: PESettings;
@@ -193,7 +195,7 @@ async function boot(opts: BootOpts): Promise<BootResult> {
     const pe = win.eval(`({
         genTab: promptEnhanceGenTab,
         settings: promptEnhanceSettings,
-        PE_ROUTES, PE_LIMITS, PE_REPLACE_MODES, PE_DEFAULT_SETTINGS,
+        PE_ROUTES, PE_API_KEY_TYPE, PE_LIMITS, PE_REPLACE_MODES, PE_DEFAULT_SETTINGS,
         peAdaptSettingsResult, peNormalizeSettings
     })`) as PEGlobals;
     const fireSessionReady = async () => {
@@ -338,7 +340,7 @@ test('Every window global the extension adds is pe-prefixed', async () => {
     assert.deepStrictEqual(added.filter((key) => !key.startsWith('pe')), [], 'no unprefixed extension globals on window');
 });
 
-test('Contract: defaults, routes, replace modes, and bounds match contracts/pe-contract.json exactly', async () => {
+test('Contract: defaults, routes, API key type, replace modes, and bounds match contracts/pe-contract.json exactly', async () => {
     const { pe } = await boot({});
     const expectedDefaults: Record<string, unknown> = {};
     for (const [key, spec] of Object.entries(CONTRACT.settings)) {
@@ -347,6 +349,7 @@ test('Contract: defaults, routes, replace modes, and bounds match contracts/pe-c
     assert.deepStrictEqual({ ...pe.PE_DEFAULT_SETTINGS }, expectedDefaults, 'defaults equal the contract');
     assert.deepStrictEqual({ ...pe.settings.effective() }, expectedDefaults, 'boot-time effective settings equal the contract defaults');
     assert.deepStrictEqual({ ...pe.PE_ROUTES }, CONTRACT.routes, 'routes equal the contract');
+    assert.strictEqual(pe.PE_API_KEY_TYPE, CONTRACT.apiKeyType, 'API key type equals the contract');
     assert.deepStrictEqual([...pe.PE_REPLACE_MODES], CONTRACT.settings.replaceMode!.enum, 'replace modes equal the contract enum');
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pe.PE_LIMITS)), {
         timeoutSeconds: { min: CONTRACT.settings.timeoutSeconds!.min, max: CONTRACT.settings.timeoutSeconds!.max },

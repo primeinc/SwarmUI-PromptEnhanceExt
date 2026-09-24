@@ -17,12 +17,12 @@ git clone https://github.com/primeinc/SwarmUI-PromptEnhanceExt.git PromptEnhance
 
 SwarmUI compiles extensions as part of its own build, so a restart (which rebuilds) is all that is needed. If the extension is listed in Swarm's extension manager (`Server` → `Extensions`), it can also be installed from there.
 
-You also need an OpenAI-compatible chat server that does not require an API key (see [Authentication limitation](#authentication-limitation)). The default Base URL, `http://localhost:11434`, is Ollama's.
+You also need an OpenAI-compatible chat server. Local servers such as Ollama, LM Studio, and llama.cpp need no key; for a server that does, see [API keys](#api-keys). The default Base URL, `http://localhost:11434`, is Ollama's.
 
 ## Usage
 
 1. Open the **Generate** tab. The **Enhance Prompt** button and a ⚙️ settings button sit directly above the prompt box.
-2. Click ⚙️ to open **PromptEnhance Settings**. Set the **Base URL** of your server and click **Save**. Reopen settings (or click **Refresh Models**) to load that server's model list, then pick a **Model** and **Save** again.
+2. Click ⚙️ to open **PromptEnhance Settings**. Set the **Base URL** of your server and click **Save**. If the server needs an API key, save it under **User → API Keys** first ([API keys](#api-keys)). Reopen settings (or click **Refresh Models**) to load that server's model list, then pick a **Model** and **Save** again.
 3. Type a prompt and click **Enhance Prompt**. While the request runs, the button is disabled and a loading indicator shows.
 
 ![The PromptEnhance Settings modal](screenshots/settings-modal.png)
@@ -58,7 +58,8 @@ Errors from **Enhance Prompt** appear in SwarmUI's error banner. Errors in the s
 | The model list shows **Error loading models** | Same as above; the settings modal could not list models from the Base URL. The stored model is kept until you pick another. |
 | `No usable model…` | No model is selected, or the server does not have it loaded. |
 | `Base URL must be a valid http(s) URL…` | Save rejected the Base URL; use an absolute URL such as `http://localhost:11434`. |
-| `The LLM backend rejected the request as unauthorized…` | The server requires an API key. See [Authentication limitation](#authentication-limitation). |
+| `The LLM backend rejected the request as unauthorized…` | The server needs an API key, or the saved one is wrong. Set it under **User → API Keys**; see [API keys](#api-keys). The server's own reason follows under **Detail**. |
+| `The saved PromptEnhance API key contains spaces or line breaks…` | Re-enter the key under **User → API Keys**. It was not sent. |
 | `The selected model rejected the attached image…` | Use a vision model, or turn off **Send Selected Image**. |
 | `The request to the LLM backend timed out…` | Raise **Timeout (s)**, or use a faster model. |
 
@@ -80,10 +81,10 @@ This extension makes outbound web connections **only to the base URL configured 
 | Request | When | What |
 | --- | --- | --- |
 | `GET {baseUrl}/v1/models` | Before every model-list or enhance call | Reachability probe. Only transport failures (connection refused, DNS) count as unreachable; no response within 3 seconds counts as reachable and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
-| `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. |
-| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
+| `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. Carries the API key, if one is set. |
+| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
 
-No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested. There is no telemetry, no update check, and no analytics of any kind.
+The reachability probe never carries the key. No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested. There is no telemetry, no update check, and no analytics of any kind.
 
 ## Settings
 
@@ -100,9 +101,18 @@ Settings are stored per-user through SwarmUI's user-data store. **Reset** in the
 | `sendSelectedImage` | `false` | When enabled, attaches the currently selected Generate-tab image to the enhance request. Requires a vision-capable model. |
 | `replaceMode` | `preview` | How the enhanced prompt is applied: `preview`, `append`, or `replace_with_restore`. |
 
-## Authentication limitation
+## API keys
 
-No API key or `Authorization` header is sent with any request. Use a server that does not require authentication — for example Ollama, LM Studio, or llama.cpp's server — or place an authenticating proxy in front of a keyed service. Pointing `baseUrl` directly at a hosted API that requires a key will fail with the backend's own error message.
+For a server that requires a key, such as a hosted OpenAI-compatible API or an authenticating proxy, save the key in SwarmUI's own key store. Open **User → User Info → API Keys**, paste the key into the **PromptEnhance LLM Server** row, and click **Save**. The settings modal shows whether a key is saved, with a link to that row.
+
+![The PromptEnhance LLM Server row in SwarmUI's User → API Keys table](screenshots/api-key-row.png)
+
+- The key is sent as `Authorization: Bearer <key>` on the model-list and enhance requests to the Base URL, and nowhere else.
+- It is stored per user on the SwarmUI server and is never sent back to the browser. The User tab and the settings modal show only *not set* or *last updated &lt;time&gt;*.
+- **Remove** in the same row deletes it. With no key saved, no `Authorization` header is sent.
+- The key goes to whatever Base URL is configured. For a remote server, use an `https://` Base URL so the key is not sent in clear text.
+
+Saving a key uses SwarmUI's `edit_user_settings` permission. Changing where the key goes (the Base URL) needs `promptenhance_config`.
 
 ## Development
 
@@ -125,7 +135,7 @@ Two layouts build and test identically; the C# project picks one automatically (
 | Path | Contents |
 | --- | --- |
 | `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, and API routes. |
-| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, and the error taxonomy. |
+| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, and the API key registration (`UpstreamApiKey.cs`). |
 | `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`); every global is `pe`-prefixed or a `promptEnhance*` singleton. |
 | `Assets/*.js` | The exact `tsc` output of `Frontend/`, committed because SwarmUI serves it. Never edit by hand; `npm run build:frontend` regenerates it. |
 | `Assets/promptenhance.css` | Extension styles, using only color tokens every SwarmUI theme defines. |
@@ -160,7 +170,7 @@ These recipes need the standalone workspace:
 | `just vendor-dev` | Seeds a minimal no-backend `Data/Settings.fds` and copies this extension into the vendored host's `src/Extensions/`. |
 | `just vendor-ci-test` | Boots the real host with SwarmUI's `--ci_test` mode; any logged error fails with a nonzero exit. |
 | `just ui-install` | Downloads the Chromium build Playwright drives (once). |
-| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backend on port 7897, and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. |
+| `just ui-test` | Rebuilds the frontend and host, starts the host on port 7898 and the fake backends on ports 7897 (no key) and 7896 (key required), and runs `Tests/ui/*.spec.ts` in headless Chromium. Screenshots land in `Tests/ui/shots/`, including one per SwarmUI theme. |
 | `just readme-shots` | Clears the previous run's README shots, runs `just ui-test`, then copies the new shots into `screenshots/` and records `screenshots/manifest.json`. |
 
 The browser gates cover:
@@ -168,6 +178,7 @@ The browser gates cover:
 - a clean console on startup
 - the preview, append, and Restore flows
 - every settings-modal path: listing models, saving, server-side rejection, an unreachable backend, Reset, and the apply-mode labels
+- API keys, against a fake server that answers only the right bearer key: refused without a key, refused with a wrong one, answered after the key is saved through the real User → API Keys row, and the key absent from every response the browser receives
 - the extension's borders and the modal in every registered theme
 
 A test declared with `test.fail` pins a known defect. It passes while the defect is present and fails the gate once the defect is fixed, so the fix commit flips it to `test`.

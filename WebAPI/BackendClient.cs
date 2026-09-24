@@ -54,7 +54,7 @@ public class BackendClient
 
     private static string ChatUrl(string normalizedBase) => $"{normalizedBase}/v1/chat/completions";
 
-    /// <summary>Reachability probe against `GET /v1/models` with a TTL cache (10s reachable, 30s unreachable). Any HTTP response counts as reachable; only transport failures count as unreachable; a probe timeout counts as reachable.</summary>
+    /// <summary>Reachability probe against `GET /v1/models` with a TTL cache (10s reachable, 30s unreachable). Sends no API key: any HTTP response, a 401 included, counts as reachable; only transport failures count as unreachable; a probe timeout counts as reachable.</summary>
     private static async Task<bool> IsReachable(string normalizedBase)
     {
         if (ReachabilityCache.TryGetValue(normalizedBase, out bool cached))
@@ -94,29 +94,39 @@ public class BackendClient
         return (int)clamped;
     }
 
-    private static async Task<(JObject settings, string normalizedBase)> ResolveConfig(Session session, Action<JObject> setError)
+    /// <summary>The error for a saved API key that cannot be sent as a header value. Never includes the key.</summary>
+    private static JObject UnsendableKeyError() => PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Authentication,
+        "The saved PromptEnhance API key contains spaces or line breaks. Re-enter it under User → API Keys.");
+
+    private static async Task<(JObject settings, string normalizedBase, string apiKey)> ResolveConfig(Session session, Action<JObject> setError)
     {
         JObject settingsResponse = await SessionSettings.GetPromptEnhanceSettings(session);
         if (settingsResponse["success"]?.Value<bool>() != true)
         {
             setError(settingsResponse);
-            return (null, null);
+            return (null, null, null);
         }
         JObject settings = settingsResponse["settings"] as JObject;
         string normalizedBase = NormalizeBaseUrl(settings?["baseUrl"]?.ToString());
         if (normalizedBase == null)
         {
             setError(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidBaseUrl));
-            return (null, null);
+            return (null, null, null);
         }
-        return (settings, normalizedBase);
+        string apiKey = UpstreamApiKey.ForUser(session);
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            setError(UnsendableKeyError());
+            return (null, null, null);
+        }
+        return (settings, normalizedBase, apiKey);
     }
 
     /// <summary>API route: lists the backend's models.</summary>
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
         JObject error = null;
-        (JObject settings, string normalizedBase) = await ResolveConfig(session, e => error = e);
+        (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
         {
             return error;
@@ -125,16 +135,21 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ServerUnavailable);
         }
-        return await ExecuteListModels(normalizedBase, ResolveTimeoutSeconds(settings));
+        return await ExecuteListModels(normalizedBase, ResolveTimeoutSeconds(settings), apiKey);
     }
 
-    /// <summary>The raw `GET /v1/models` round-trip.</summary>
-    public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec)
+    /// <summary>The raw `GET /v1/models` round-trip, sending `apiKey` as a bearer token when given.</summary>
+    public static async Task<JObject> ExecuteListModels(string normalizedBase, int timeoutSec, string apiKey = null)
     {
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            return UnsendableKeyError();
+        }
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(timeoutSec));
             using HttpRequestMessage request = new(HttpMethod.Get, ModelsUrl(normalizedBase));
+            UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
@@ -172,7 +187,7 @@ public class BackendClient
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No prompt text was provided to enhance.");
         }
         JObject error = null;
-        (JObject settings, string normalizedBase) = await ResolveConfig(session, e => error = e);
+        (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
         {
             return error;
@@ -199,12 +214,16 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
         }
-        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec);
+        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey);
     }
 
-    /// <summary>The raw `POST /v1/chat/completions` round-trip. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
-    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec)
+    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
+    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null)
     {
+        if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
+        {
+            return UnsendableKeyError();
+        }
         object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
         string json = JsonSerializer.Serialize(requestBody);
         try
@@ -214,6 +233,7 @@ public class BackendClient
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
+            UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)

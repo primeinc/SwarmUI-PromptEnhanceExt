@@ -1,10 +1,11 @@
 {
-  "inputs": "2f399e6de251cbacf0abf37d217b55da54b430f305fa2f4dcd8401b69d49384f",
+  "inputs": "bcf071274e3c2b2ee1f6afde2c9f56fc9e20b6a06d3292d2a59580129f59d4b2",
   "swarmuiPin": "96a4c3d14a31776bab5e3300301e078c15875f22",
   "shots": {
+    "api-key-row.png": "1d8e3c5d37a667a07cc3605977c95dcb2dffc728",
     "enhance-button.png": "d5e01f6503a86deb1894f5981aee07fd80b697fe",
     "enhance-preview.png": "94d6ac58aa8af05063d3ab0d699fc12961090d25",
     "enhance-restore.png": "aa6c94585be29f3497d8b8c0a07d31a82525fad3",
-    "settings-modal.png": "39193555aa8ebf0cf0b8ff4c14bba3f75a0d1987"
+    "settings-modal.png": "5548992f656d8d696e4a5293b8d87f309b981168"
   }
 }

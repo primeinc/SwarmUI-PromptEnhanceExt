@@ -19,9 +19,10 @@ public class PromptEnhanceExtension : Extension
         Logs.Init("PromptEnhance extension loaded.");
     }
 
-    /// <summary>Registers the five API routes with their permissions.</summary>
+    /// <summary>Registers the five API routes with their permissions, and the backend API key in SwarmUI's User → API Keys table.</summary>
     public override void OnInit()
     {
         PromptEnhanceAPI.Register();
+        UpstreamApiKey.Register();
     }
 }

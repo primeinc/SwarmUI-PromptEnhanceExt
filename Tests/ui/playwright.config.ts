@@ -6,6 +6,9 @@ const port = Number(process.env.PE_UI_PORT ?? 7898);
 /** Port of the fake OpenAI-compatible backend (fake-backend.mts) the extension is pointed at. */
 const fakeBackendPort = Number(process.env.PE_FAKE_BACKEND_PORT ?? 7897);
 
+/** Port of the fake backend that requires `Authorization: Bearer <PE_FAKE_BACKEND_KEY>`. */
+const fakeKeyedBackendPort = Number(process.env.PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
+
 /**
  * Browser gates against the real vendored SwarmUI host with this extension copied in.
  * `just ui-test` builds the frontend, syncs the extension copy, and builds the host first;
@@ -29,7 +32,7 @@ export default defineConfig({
             name: 'fake-backend',
             command: 'node fake-backend.mts',
             cwd: '.',
-            env: { PE_FAKE_BACKEND_PORT: String(fakeBackendPort) },
+            env: { PE_FAKE_BACKEND_PORT: String(fakeBackendPort), PE_FAKE_KEYED_BACKEND_PORT: String(fakeKeyedBackendPort) },
             url: `http://127.0.0.1:${fakeBackendPort}/v1/models`,
             reuseExistingServer: false,
             timeout: 30_000,
