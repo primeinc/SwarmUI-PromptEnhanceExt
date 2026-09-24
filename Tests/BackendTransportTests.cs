@@ -147,6 +147,22 @@ public class BackendTransportTests
     }
 
     [Xunit.Fact]
+    public async Task PromptEnhanceListModels_BackendOnAPortThatWasDeadMomentsAgo_IsReachable()
+    {
+        TcpListener probe = new(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://127.0.0.1:{port}\"}}");
+        JObject dead = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.Equal("server_unavailable", dead["error_id"]!.Value<string>());
+        using MockHttpServer live = new(200, "OK", ModelsBody, port: port);
+        JObject r = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.True(r["success"]!.Value<bool>(), r.ToString());
+    }
+
+    [Xunit.Fact]
     public async Task PromptEnhanceListModels_LiveBackend_PassesProbeAndReturnsModels()
     {
         using MockHttpServer server = new(200, "OK", ModelsBody);
@@ -173,15 +189,17 @@ internal sealed class MockHttpServer : IDisposable
     /// <summary>The header block (request line plus headers) of every request received, in arrival order.</summary>
     public readonly ConcurrentQueue<string> RequestHeads = new();
 
-    public MockHttpServer(int status, string reason, string body, int delayMs = 0, string? location = null)
+    /// <summary>Listens on <paramref name="port"/> (0 picks a free one). A backend now answering at this URL makes any cached "unreachable" probe result for it stale, so it is forgotten.</summary>
+    public MockHttpServer(int status, string reason, string body, int delayMs = 0, string? location = null, int port = 0)
     {
         _status = status;
         _reason = reason;
         _body = body;
         _delayMs = delayMs;
         _location = location;
-        _listener = new TcpListener(IPAddress.Loopback, 0);
+        _listener = new TcpListener(IPAddress.Loopback, port);
         _listener.Start();
+        WebAPI.BackendClient.ForgetReachability(BaseUrl);
         _ = Task.Run(AcceptLoopAsync);
     }
 

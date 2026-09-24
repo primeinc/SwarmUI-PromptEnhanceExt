@@ -190,7 +190,7 @@ The browser gates cover:
 
 ### README screenshots
 
-The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. Every browser run compares them pixel by pixel, with a small tolerance for antialiasing. `just ui-test-force` runs with `--update-snapshots=changed`, so Playwright rewrites a PNG only when the picture really changed. An unchanged UI leaves `screenshots/` untouched.
+The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. Every browser run on the default ports compares them pixel by pixel, and one differing pixel fails, so a single changed character fails. Other ports skip the comparison, since the settings modal shows the port values. `just ui-test-force` runs with `--update-snapshots=changed`, so Playwright rewrites a PNG only when the picture really changed. An unchanged UI leaves `screenshots/` untouched.
 
 `screenshots/manifest.json` records:
 - each screenshot's sha256
@@ -201,6 +201,8 @@ Only the gate writes it, and only after a run that passed in full, unfiltered, o
 - a screenshot differs from the one recorded, or is added or missing
 - any input or the pin changed since that run
 - the README does not show a recorded screenshot
+
+The manifest guards against committing stale screenshots by accident. It is not tamper-proof.
 
 The fix is always `just ui-test`, then commit `screenshots/`. Removing a screenshot from the specs does not delete its PNG; delete it and the README reference in the same change.
 

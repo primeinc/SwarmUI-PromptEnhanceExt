@@ -17,7 +17,7 @@ namespace PromptEnhance.WebAPI;
 public class BackendClient
 {
     /// <summary>The one client for every backend call; see <see cref="CreateHttpClient"/>.</summary>
-    private static readonly HttpClient HttpClient = CreateHttpClient();
+    internal static readonly HttpClient HttpClient = CreateHttpClient();
 
     /// <summary>SwarmUI's <see cref="NetworkBackendUtils.MakeHttpClient"/> configuration with automatic redirects off, so a request never leaves the configured Base URL. Per-request timeouts come from settings.</summary>
     private static HttpClient CreateHttpClient()
@@ -52,6 +52,12 @@ public class BackendClient
 
     /// <summary>Probe results keyed by normalized Base URL.</summary>
     private static readonly MemoryCache ReachabilityCache = new(new MemoryCacheOptions());
+
+    /// <summary>Drops the cached probe result for <paramref name="normalizedBase"/>, for when a backend is known to have started or stopped there.</summary>
+    internal static void ForgetReachability(string normalizedBase)
+    {
+        ReachabilityCache.Remove(normalizedBase);
+    }
 
     /// <summary>Normalizes a base URL: trims, strips trailing slashes and a trailing `/v1`, requires an absolute http(s) URI with no query, fragment, or user info (any of which would change the path or host the fixed `/v1/...` suffix reaches). Returns null otherwise.</summary>
     public static string NormalizeBaseUrl(string raw)
