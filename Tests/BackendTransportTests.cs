@@ -165,6 +165,19 @@ public class BackendTransportTests
         Xunit.Assert.True(again.ElapsedMilliseconds < 500, $"second call took {again.ElapsedMilliseconds} ms; the probe did not cache the dead backend");
     }
 
+    /// <summary>A backend listening on 127.0.0.1 only, reached as localhost: the ::1 attempt is refused while the IPv4 one connects, and the request goes through without waiting out the refusal.</summary>
+    [Xunit.Fact]
+    public async Task ExecuteListModels_LocalhostWithIPv4OnlyBackend_ConnectsWithoutWaitingOnRefusedAddress()
+    {
+        using MockHttpServer server = new(200, "OK", ModelsBody);
+        Stopwatch elapsed = Stopwatch.StartNew();
+        JObject r = await WebAPI.BackendClient.ExecuteListModels($"http://localhost:{server.Port}", 30);
+        elapsed.Stop();
+        Xunit.Assert.True(r["success"]!.Value<bool>(), r.ToString());
+        Xunit.Assert.Single(server.RequestHeads);
+        Xunit.Assert.True(elapsed.ElapsedMilliseconds < 1000, $"took {elapsed.ElapsedMilliseconds} ms; the connect waited on a refused address");
+    }
+
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_BackendOnAPortThatWasDeadMomentsAgo_IsReachable()
     {
