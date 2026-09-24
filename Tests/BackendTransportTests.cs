@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -146,11 +147,29 @@ public class BackendTransportTests
         Xunit.Assert.Equal("server_unavailable", r["error_id"]!.Value<string>());
     }
 
+    /// <summary>localhost resolves to ::1 and 127.0.0.1. Windows retries a refused SYN for about 2s per address, so trying them one after the other outlasts the 3s probe, whose timeout counts as reachable, and every call pays the full wait again.</summary>
+    [Xunit.Fact]
+    public async Task PromptEnhanceListModels_DeadLocalhost_IsCachedUnreachable()
+    {
+        using Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        int port = ((IPEndPoint)reserved.LocalEndPoint!).Port;
+        SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", $"{{\"baseUrl\":\"http://localhost:{port}\"}}");
+        JObject first = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        Xunit.Assert.Equal("server_unavailable", first["error_id"]!.Value<string>());
+        Stopwatch again = Stopwatch.StartNew();
+        JObject second = await WebAPI.BackendClient.PromptEnhanceListModels(session);
+        again.Stop();
+        Xunit.Assert.Equal("server_unavailable", second["error_id"]!.Value<string>());
+        Xunit.Assert.True(again.ElapsedMilliseconds < 500, $"second call took {again.ElapsedMilliseconds} ms; the probe did not cache the dead backend");
+    }
+
     [Xunit.Fact]
     public async Task PromptEnhanceListModels_BackendOnAPortThatWasDeadMomentsAgo_IsReachable()
     {
         // Bound but not listening: connections are refused, and no other process can take the port before the server does.
-        Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using Socket reserved = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         int port = ((IPEndPoint)reserved.LocalEndPoint!).Port;
         SwarmUI.Accounts.Session session = TestSessions.MakeRealSession();
