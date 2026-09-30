@@ -37,7 +37,7 @@ let PE_DEFAULT_SETTINGS: PESettings = {
     systemPrompt: "You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.",
     temperature: 0.7,
     maxTokens: 1024,
-    sendSelectedImage: false,
+    sendPromptImages: false,
     pastGenerations: 0,
     sendActiveModelContext: false,
     replaceMode: 'preview'
@@ -90,7 +90,7 @@ function peNormalizeSettings(raw: PERawSettingsInput, current: PESettings): PESe
         systemPrompt: raw.systemPrompt ?? current.systemPrompt,
         temperature: clamp(num(raw.temperature, current.temperature), PE_LIMITS.temperature.min, PE_LIMITS.temperature.max),
         maxTokens: clamp(Math.round(num(raw.maxTokens, current.maxTokens)), PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max),
-        sendSelectedImage: raw.sendSelectedImage ?? current.sendSelectedImage,
+        sendPromptImages: raw.sendPromptImages ?? current.sendPromptImages,
         pastGenerations: clamp(Math.round(num(raw.pastGenerations, current.pastGenerations)), PE_LIMITS.pastGenerations.min, PE_LIMITS.pastGenerations.max),
         sendActiveModelContext: raw.sendActiveModelContext ?? current.sendActiveModelContext,
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
@@ -128,8 +128,8 @@ function peAdaptSettingsResult(data: unknown): PESettingsResult {
     if (typeof raw.maxTokens == 'number' && Number.isFinite(raw.maxTokens)) {
         settings.maxTokens = raw.maxTokens;
     }
-    if (typeof raw.sendSelectedImage == 'boolean') {
-        settings.sendSelectedImage = raw.sendSelectedImage;
+    if (typeof raw.sendPromptImages == 'boolean') {
+        settings.sendPromptImages = raw.sendPromptImages;
     }
     if (typeof raw.pastGenerations == 'number' && Number.isFinite(raw.pastGenerations)) {
         settings.pastGenerations = raw.pastGenerations;
