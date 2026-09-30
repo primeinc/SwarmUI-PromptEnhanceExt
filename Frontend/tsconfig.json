@@ -9,5 +9,5 @@
         "outDir": "../Assets",
         "types": []
     },
-    "files": ["swarm.d.ts", "contracts.ts", "settings.ts", "promptenhance.ts"]
+    "files": ["swarm.d.ts", "contracts.ts", "settings.ts", "context.ts", "promptenhance.ts"]
 }
