@@ -162,6 +162,26 @@ public class SessionSettingsTests
         AssertRejected(error);
     }
 
+    [Xunit.Theory]
+    [Xunit.InlineData(-1)]
+    [Xunit.InlineData(11)]
+    public void ValidateSettings_RejectsPastGenerationsOutsideContract(int value)
+    {
+        JObject input = Full();
+        input["pastGenerations"] = value;
+        JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
+        AssertRejected(error);
+    }
+
+    [Xunit.Fact]
+    public void ValidateSettings_RejectsNonBooleanActiveModelContext()
+    {
+        JObject input = Full();
+        input["sendActiveModelContext"] = "yes";
+        JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
+        AssertRejected(error);
+    }
+
     [Xunit.Fact]
     public void ValidateSettings_RejectsUnparseableBaseUrl()
     {
