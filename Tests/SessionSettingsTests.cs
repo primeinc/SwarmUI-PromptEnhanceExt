@@ -154,10 +154,10 @@ public class SessionSettingsTests
     }
 
     [Xunit.Fact]
-    public void ValidateSettings_RejectsNonBooleanSendSelectedImage()
+    public void ValidateSettings_RejectsNonBooleanSendPromptImages()
     {
         JObject input = Full();
-        input["sendSelectedImage"] = "yes";
+        input["sendPromptImages"] = "yes";
         JObject? error = WebAPI.SessionSettings.ValidateSettings(input);
         AssertRejected(error);
     }
