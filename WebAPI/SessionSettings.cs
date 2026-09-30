@@ -77,6 +77,24 @@ public class SessionSettings
         return storedObj;
     }
 
+    /// <summary>The user's effective settings: stored values merged over <see cref="Defaults"/>, per known key. <paramref name="recovered"/> is set when the stored blob was corrupt and the defaults apply.</summary>
+    public static JObject Effective(Session session, out bool recovered)
+    {
+        JObject settings = Defaults;
+        JObject storedObj = ReadStored(session, out recovered);
+        if (storedObj != null)
+        {
+            foreach (string key in KnownKeys)
+            {
+                if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
+                {
+                    settings[key] = storedObj[key];
+                }
+            }
+        }
+        return settings;
+    }
+
     /// <summary>API route: returns the user's effective settings (stored values merged over defaults).</summary>
     [API.APIDescription("Returns the current user's PromptEnhance settings: stored values merged over the defaults. The backend API key is not part of the settings and is never returned.",
         """
@@ -99,18 +117,7 @@ public class SessionSettings
     {
         try
         {
-            JObject settings = Defaults;
-            JObject storedObj = ReadStored(session, out bool recovered);
-            if (storedObj != null)
-            {
-                foreach (string key in KnownKeys)
-                {
-                    if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
-                    {
-                        settings[key] = storedObj[key];
-                    }
-                }
-            }
+            JObject settings = Effective(session, out bool recovered);
             JObject response = PromptEnhanceAPI.CreateSettingsResponse(settings);
             if (recovered)
             {

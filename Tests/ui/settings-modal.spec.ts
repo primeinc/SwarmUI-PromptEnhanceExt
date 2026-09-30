@@ -8,6 +8,24 @@ const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'co
     settings: Record<string, { default: unknown; enum?: string[] }>;
 };
 
+/** The contract spec of one setting; throws when the contract has no such key. */
+function contractSetting(key: string): { default: unknown; enum?: string[] } {
+    const spec = contract.settings[key];
+    if (spec === undefined) {
+        throw new Error(`contracts/pe-contract.json has no setting '${key}'`);
+    }
+    return spec;
+}
+
+/** The contract default of one string setting. */
+function stringDefault(key: string): string {
+    const value = contractSetting(key).default;
+    if (typeof value !== 'string') {
+        throw new Error(`contract setting '${key}' has no string default`);
+    }
+    return value;
+}
+
 /** A base URL with nothing listening. */
 const deadBackendUrl = 'http://127.0.0.1:1';
 
@@ -40,7 +58,7 @@ test('offers exactly the contract apply modes, each under a readable label', asy
     await openGenerateTab(page);
     await openModal(page);
     const options = await page.locator('#pe_replace_mode option').evaluateAll((elems) => elems.map((elem) => ({ value: (elem as HTMLOptionElement).value, label: elem.textContent?.trim() ?? '' })));
-    expect(options.map((option) => option.value)).toEqual(contract.settings.replaceMode!.enum);
+    expect(options.map((option) => option.value)).toEqual(contractSetting('replaceMode').enum);
     for (const option of options) {
         expect(option.label, `mode ${option.value} shows a label, not its wire value`).not.toEqual(option.value);
         expect(option.label).not.toEqual('');
@@ -77,11 +95,11 @@ test('Reset restores the contract defaults in the form and on the server', async
     await openModal(page);
     await expect(page.locator('#pe_temperature')).toHaveValue('1.5');
     await page.locator('#pe_reset_btn').click();
-    await expect(page.locator('#pe_base_url')).toHaveValue(contract.settings.baseUrl!.default as string);
-    await expect(page.locator('#pe_temperature')).toHaveValue(String(contract.settings.temperature!.default));
-    await expect(page.locator('#pe_replace_mode')).toHaveValue(contract.settings.replaceMode!.default as string);
+    await expect(page.locator('#pe_base_url')).toHaveValue(stringDefault('baseUrl'));
+    await expect(page.locator('#pe_temperature')).toHaveValue(String(contractSetting('temperature').default));
+    await expect(page.locator('#pe_replace_mode')).toHaveValue(stringDefault('replaceMode'));
     const stored = await callRoute(page, 'GetPromptEnhanceSettings', {});
-    expect(stored).toMatchObject({ success: true, settings: { baseUrl: contract.settings.baseUrl!.default, temperature: contract.settings.temperature!.default } });
+    expect(stored).toMatchObject({ success: true, settings: { baseUrl: stringDefault('baseUrl'), temperature: contractSetting('temperature').default } });
 });
 
 test('Close hides the modal', async ({ page }) => {

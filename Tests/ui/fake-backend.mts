@@ -6,9 +6,10 @@
  */
 import * as http from 'node:http';
 
-const openPort = Number(process.env.PE_FAKE_BACKEND_PORT ?? 7897);
-const keyedPort = Number(process.env.PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
-const requiredKey = process.env.PE_FAKE_BACKEND_KEY ?? 'pe-test-key';
+const { PE_FAKE_BACKEND_PORT, PE_FAKE_KEYED_BACKEND_PORT, PE_FAKE_BACKEND_KEY } = process.env;
+const openPort = Number(PE_FAKE_BACKEND_PORT ?? 7897);
+const keyedPort = Number(PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
+const requiredKey = PE_FAKE_BACKEND_KEY ?? 'pe-test-key';
 
 /** The model id the fake backends advertise. */
 const modelId = 'fake-enhancer';

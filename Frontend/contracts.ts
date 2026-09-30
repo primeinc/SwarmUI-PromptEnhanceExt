@@ -7,10 +7,10 @@
  */
 
 /** The prompt-application policies, mirrored from contracts/pe-contract.json. */
-let PE_REPLACE_MODES: readonly PEReplaceMode[] = ['preview', 'append', 'replace_with_restore'];
+const PE_REPLACE_MODES: readonly PEReplaceMode[] = ['preview', 'append', 'replace_with_restore'];
 
 /** API route names, mirrored from contracts/pe-contract.json. */
-let PE_ROUTES: PERoutes = {
+globalThis.PE_ROUTES = {
     listModels: 'PromptEnhanceListModels',
     run: 'PromptEnhanceRun',
     getSettings: 'GetPromptEnhanceSettings',
@@ -19,18 +19,18 @@ let PE_ROUTES: PERoutes = {
 };
 
 /** Key type of the backend API key in SwarmUI's User → API Keys table, mirrored from contracts/pe-contract.json. */
-let PE_API_KEY_TYPE = 'promptenhance_api';
+globalThis.PE_API_KEY_TYPE = 'promptenhance_api';
 
 /** Numeric input bounds, mirrored from contracts/pe-contract.json. */
-let PE_LIMITS: PELimits = {
+const PE_LIMITS: PELimits = {
     timeoutSeconds: { min: 1, max: 3600 },
     temperature: { min: 0, max: 2 },
-    maxTokens: { min: 1, max: 2147483647 },
+    maxTokens: { min: 1, max: 2_147_483_647 },
     pastGenerations: { min: 0, max: 10 }
 };
 
 /** Settings defaults, mirrored from contracts/pe-contract.json. */
-let PE_DEFAULT_SETTINGS: PESettings = {
+globalThis.PE_DEFAULT_SETTINGS = {
     baseUrl: 'http://localhost:11434',
     model: '',
     timeoutSeconds: 60,
@@ -45,26 +45,34 @@ let PE_DEFAULT_SETTINGS: PESettings = {
 
 /** True for any non-null object. */
 function peIsRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value == 'object' && value != null;
+    return typeof value === 'object' && value !== null;
+}
+
+/** A finite number, or undefined. */
+function peFiniteNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /** Normalizes a genericRequest error-callback value (string, Error, or arbitrary host object) into text. */
-function peErrorText(err: unknown): string {
+globalThis.peErrorText = (err: unknown): string => {
     if (err instanceof Error && err.message) {
         return err.message;
     }
-    if (peIsRecord(err) && typeof err.message == 'string' && err.message) {
-        return err.message;
+    if (peIsRecord(err)) {
+        const { message } = err;
+        if (typeof message === 'string' && message) {
+            return message;
+        }
     }
-    if (typeof err == 'string' && err) {
+    if (typeof err === 'string' && err) {
         return err;
     }
     return 'request error';
-}
+};
 
 /** Narrows an arbitrary value to a replace mode, or null. */
 function peReplaceModeOf(value: unknown): PEReplaceMode | null {
-    for (let mode of PE_REPLACE_MODES) {
+    for (const mode of PE_REPLACE_MODES) {
         if (value === mode) {
             return mode;
         }
@@ -77,12 +85,12 @@ function peReplaceModeOf(value: unknown): PEReplaceMode | null {
  * parse and clamp to PE_LIMITS, unparseable numbers and unknown modes keep the current value, and
  * an empty model keeps the current model.
  */
-function peNormalizeSettings(raw: PERawSettingsInput, current: PESettings): PESettings {
-    let num = (text: string | undefined, fallback: number): number => {
-        let value = Number.parseFloat(text ?? '');
+globalThis.peNormalizeSettings = (raw: PERawSettingsInput, current: PESettings): PESettings => {
+    const num = (text: string | undefined, fallback: number): number => {
+        const value = Number.parseFloat(text ?? '');
         return Number.isFinite(value) ? value : fallback;
     };
-    let clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+    const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
     return {
         baseUrl: (raw.baseUrl ?? current.baseUrl).trim(),
         model: raw.model || current.model,
@@ -95,7 +103,7 @@ function peNormalizeSettings(raw: PERawSettingsInput, current: PESettings): PESe
         sendActiveModelContext: raw.sendActiveModelContext ?? current.sendActiveModelContext,
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
     };
-}
+};
 
 /**
  * The adapters below see only responses SwarmUI's genericRequest passed to the success callback;
@@ -104,67 +112,85 @@ function peNormalizeSettings(raw: PERawSettingsInput, current: PESettings): PESe
  */
 
 /** Adapter: Get/Save/ResetPromptEnhanceSettings response -> PESettingsResult. Accepts only `success: true` with an object `settings` payload; each key is copied only when it matches the schema type. */
-function peAdaptSettingsResult(data: unknown): PESettingsResult {
-    if (!peIsRecord(data) || data.success !== true || !peIsRecord(data.settings)) {
+globalThis.peAdaptSettingsResult = (data: unknown): PESettingsResult => {
+    if (!peIsRecord(data)) {
         return { ok: false, error: 'The server returned settings in an unexpected shape.' };
     }
-    let raw = data.settings;
-    let settings: Partial<PESettings> = {};
-    if (typeof raw.baseUrl == 'string') {
-        settings.baseUrl = raw.baseUrl;
+    const { success, settings: raw } = data;
+    if (success !== true || !peIsRecord(raw)) {
+        return { ok: false, error: 'The server returned settings in an unexpected shape.' };
     }
-    if (typeof raw.model == 'string') {
-        settings.model = raw.model;
+    const { baseUrl, model, timeoutSeconds, systemPrompt, temperature, maxTokens, sendPromptImages, pastGenerations, sendActiveModelContext, replaceMode } = raw;
+    const settings: Partial<PESettings> = {};
+    if (typeof baseUrl === 'string') {
+        settings.baseUrl = baseUrl;
     }
-    if (typeof raw.timeoutSeconds == 'number' && Number.isFinite(raw.timeoutSeconds)) {
-        settings.timeoutSeconds = raw.timeoutSeconds;
+    if (typeof model === 'string') {
+        settings.model = model;
     }
-    if (typeof raw.systemPrompt == 'string') {
-        settings.systemPrompt = raw.systemPrompt;
+    const timeout = peFiniteNumber(timeoutSeconds);
+    if (timeout !== undefined) {
+        settings.timeoutSeconds = timeout;
     }
-    if (typeof raw.temperature == 'number' && Number.isFinite(raw.temperature)) {
-        settings.temperature = raw.temperature;
+    if (typeof systemPrompt === 'string') {
+        settings.systemPrompt = systemPrompt;
     }
-    if (typeof raw.maxTokens == 'number' && Number.isFinite(raw.maxTokens)) {
-        settings.maxTokens = raw.maxTokens;
+    const temp = peFiniteNumber(temperature);
+    if (temp !== undefined) {
+        settings.temperature = temp;
     }
-    if (typeof raw.sendPromptImages == 'boolean') {
-        settings.sendPromptImages = raw.sendPromptImages;
+    const tokens = peFiniteNumber(maxTokens);
+    if (tokens !== undefined) {
+        settings.maxTokens = tokens;
     }
-    if (typeof raw.pastGenerations == 'number' && Number.isFinite(raw.pastGenerations)) {
-        settings.pastGenerations = raw.pastGenerations;
+    if (typeof sendPromptImages === 'boolean') {
+        settings.sendPromptImages = sendPromptImages;
     }
-    if (typeof raw.sendActiveModelContext == 'boolean') {
-        settings.sendActiveModelContext = raw.sendActiveModelContext;
+    const past = peFiniteNumber(pastGenerations);
+    if (past !== undefined) {
+        settings.pastGenerations = past;
     }
-    let mode = peReplaceModeOf(raw.replaceMode);
+    if (typeof sendActiveModelContext === 'boolean') {
+        settings.sendActiveModelContext = sendActiveModelContext;
+    }
+    const mode = peReplaceModeOf(replaceMode);
     if (mode) {
         settings.replaceMode = mode;
     }
     return { ok: true, settings };
-}
+};
 
 /** Adapter: PromptEnhanceListModels response -> PEModelsResult. An empty model list is classified as a failure. */
-function peAdaptModelsResult(data: unknown): PEModelsResult {
-    if (!peIsRecord(data) || data.success !== true || !Array.isArray(data.models)) {
+globalThis.peAdaptModelsResult = (data: unknown): PEModelsResult => {
+    if (!peIsRecord(data)) {
         return { ok: false, error: 'The server returned the model list in an unexpected shape.' };
     }
-    let models: PEModelOption[] = [];
-    for (let entry of data.models) {
-        if (peIsRecord(entry) && typeof entry.id == 'string' && entry.id) {
-            models.push({ id: entry.id, name: typeof entry.name == 'string' && entry.name ? entry.name : entry.id });
+    const { success, models: entries } = data;
+    if (success !== true || !Array.isArray(entries)) {
+        return { ok: false, error: 'The server returned the model list in an unexpected shape.' };
+    }
+    const models: PEModelOption[] = [];
+    for (const entry of entries) {
+        if (peIsRecord(entry)) {
+            const { id, name } = entry;
+            if (typeof id === 'string' && id) {
+                models.push({ id, name: typeof name === 'string' && name ? name : id });
+            }
         }
     }
-    if (models.length == 0) {
+    if (models.length === 0) {
         return { ok: false, error: 'The backend lists no models.' };
     }
     return { ok: true, models };
-}
+};
 
 /** Adapter: PromptEnhanceRun response -> PEEnhanceResult. Success requires a non-empty string `response`. */
-function peAdaptEnhanceResult(data: unknown): PEEnhanceResult {
-    if (peIsRecord(data) && data.success === true && typeof data.response == 'string' && data.response.length > 0) {
-        return { ok: true, response: data.response };
+globalThis.peAdaptEnhanceResult = (data: unknown): PEEnhanceResult => {
+    if (peIsRecord(data)) {
+        const { success, response } = data;
+        if (success === true && typeof response === 'string' && response.length > 0) {
+            return { ok: true, response };
+        }
     }
     return { ok: false, error: 'The server returned the enhancement in an unexpected shape.' };
-}
+};

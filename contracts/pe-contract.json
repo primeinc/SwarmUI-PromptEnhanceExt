@@ -16,6 +16,7 @@
     "InvalidResponseShape": "invalid_response_shape",
     "HttpError": "http_error",
     "Authentication": "authentication",
+    "InvalidRequest": "invalid_request",
     "Generic": "generic"
   },
   "apiKeyType": "promptenhance_api",

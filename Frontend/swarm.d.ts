@@ -6,7 +6,8 @@
  * `npm run check:frontend-parity`). Never hand-edit the emitted Assets/*.js.
  *
  * These are classic global scripts (no import/export), loaded after SwarmUI's own genpage scripts
- * in registration order: contracts.js, settings.js, promptenhance.js (PromptEnhanceExtension.OnPreInit).
+ * in registration order: contracts.js, settings.js, swarminput.js, promptenhance.js
+ * (PromptEnhanceExtension.OnPreInit).
  */
 
 /** Prompt-application policy selector. */
@@ -46,73 +47,13 @@ interface PEModelOption {
     name: string;
 }
 
-/** Wire shape of one media entry in a PromptEnhanceRun request. */
-interface PEMediaEntry {
-    type: 'base64';
-    data: string;
-    mediaType: string;
-    label?: string;
-}
+/** SwarmUI generation input, keyed by the Generate tab's parameter ids, as `getInputVal(elem, true)` reads it (util.js). */
+type PESwarmInput = Record<string, string | string[] | boolean>;
 
-interface PEModelMetadataContext {
-    name: string;
-    title?: string;
-    architecture?: string;
-    class?: string;
-    compatClass?: string;
-    description?: string;
-    usageHint?: string;
-    triggerPhrase?: string;
-    tags: string[];
-}
-
-interface PEActiveLoraContext extends PEModelMetadataContext {
-    weight: number;
-    textEncoderWeight: number;
-    scopeId: number;
-    scope: string;
-}
-
-interface PEActiveModelContext {
-    baseModel: PEModelMetadataContext | null;
-    loras: PEActiveLoraContext[];
-}
-
-interface PEPastGenerationOutput {
-    image: PEMediaEntry;
-    metadata: string;
-}
-
-interface PEPastGenerationContext {
-    requestId: string;
-    prompt: string;
-    outputs: PEPastGenerationOutput[];
-}
-
-interface PEGenerationOutputSource {
-    src: string;
-    metadata: string;
-    batchId: string;
-    batchIndex: number;
-}
-
-interface PEGenerationAttempt {
-    requestId: string;
-    prompt: string;
-    outputs: PEGenerationOutputSource[];
-}
-
-interface PEPromptContext {
-    promptImages: PEMediaEntry[];
-    pastGenerations: PEPastGenerationContext[];
-    activeModel?: PEActiveModelContext;
-}
-
-/** Request payload for the PromptEnhanceRun API route. */
+/** Request payload for the PromptEnhanceRun API route. `swarmInput` carries the enabled context channels' SwarmUI input; Past Generations come from the server-side history. */
 interface PEEnhancePayload {
     prompt: string;
-    media?: PEMediaEntry[];
-    context?: PEPromptContext;
+    swarmInput?: PESwarmInput;
 }
 
 /** A preview-mode enhancement awaiting explicit Apply/Cancel. */
@@ -163,8 +104,19 @@ declare function showError(message: string): void;
 /** Fires `input` and `change` for a programmatically edited control (site.js). */
 declare function triggerChangeFor(elem: HTMLElement): void;
 
-/** Reads an image src (including SwarmUI `inputs/` paths and Civitai URLs) into a data URL; the callback receives null on failure (util.js). */
-declare function imageToData(src: string, callback: (dataUrl: string | null) => void, resize256?: boolean): void;
+/** One registered generation parameter, as the Generate tab lists them (params.js); only the fields PromptEnhance reads. */
+interface SwarmParamType {
+    readonly id: string;
+}
+
+/** Every registered generation parameter, loaded with the Generate tab (params.js). */
+declare var gen_param_types: SwarmParamType[];
+
+/** Whether a parameter and all of its containing groups are enabled (params.js), the rule getGenInput uses to decide what it sends. */
+declare function isParamEnabled(param: SwarmParamType): boolean;
+
+/** The current value of an input element (util.js): a checkbox's boolean, a file input's data, a multi-select's selected values as an array when `rawLists`, else the element's value. */
+declare function getInputVal(input: HTMLElement, rawLists?: boolean): string | string[] | boolean | null;
 
 /** Returns the element with the id, throwing when it is absent (util.js). */
 declare function getRequiredElementById(id: string): HTMLElement;

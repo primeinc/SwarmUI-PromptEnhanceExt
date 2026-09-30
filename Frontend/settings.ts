@@ -7,7 +7,7 @@
  */
 
 /** Display labels for the replace modes, in PE_REPLACE_MODES order. */
-let PE_MODE_LABELS: Record<PEReplaceMode, string> = {
+const PE_MODE_LABELS: Record<PEReplaceMode, string> = {
     preview: 'Preview (Apply / Cancel)',
     append: 'Append (keep original)',
     replace_with_restore: 'Replace (with Restore button)'
@@ -35,11 +35,14 @@ class PromptEnhanceSettings {
     load(): Promise<void> {
         return new Promise((resolve) => {
             genericRequest(PE_ROUTES.getSettings, {}, (data) => {
-                let result = peAdaptSettingsResult(data);
+                const result = peAdaptSettingsResult(data);
                 if (result.ok) {
                     this.apply(result.settings);
-                    if (peIsRecord(data) && data.recovered === true) {
-                        console.warn('[PromptEnhance] Stored settings were corrupt; defaults were applied and the corrupt data was backed up server-side (generic-data subkey config_corrupt_backup).');
+                    if (peIsRecord(data)) {
+                        const { recovered } = data;
+                        if (recovered === true) {
+                            console.warn('[PromptEnhance] Stored settings were corrupt; defaults were applied and the corrupt data was backed up server-side (generic-data subkey config_corrupt_backup).');
+                        }
                     }
                 }
                 else {
@@ -55,18 +58,18 @@ class PromptEnhanceSettings {
 
     /** Writes the modal status line; `kind` picks SwarmUI's success or error styling. */
     setStatus(message: string, kind: '' | 'ok' | 'error'): void {
-        let status = document.getElementById('pe_settings_status');
+        const status = document.getElementById('pe_settings_status');
         if (!status) {
             return;
         }
         status.textContent = message;
-        status.classList.toggle('modal_success_bottom', kind == 'ok');
-        status.classList.toggle('modal_error_bottom', kind == 'error');
+        status.classList.toggle('modal_success_bottom', kind === 'ok');
+        status.classList.toggle('modal_error_bottom', kind === 'error');
     }
 
     /** Reads the modal fields into a complete, in-bounds settings value. */
     readForm(): PESettings {
-        let value = (id: string): string => (getRequiredElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+        const value = (id: string): string => (getRequiredElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
         return peNormalizeSettings({
             baseUrl: value('pe_base_url'),
             model: value('pe_model_select'),
@@ -83,8 +86,8 @@ class PromptEnhanceSettings {
 
     /** Writes the effective settings into the modal fields. */
     populateForm(): void {
-        let current = this.effective();
-        let set = (id: string, value: string | number): void => {
+        const current = this.effective();
+        const set = (id: string, value: string | number): void => {
             (getRequiredElementById(id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value = `${value}`;
         };
         set('pe_base_url', current.baseUrl);
@@ -96,19 +99,19 @@ class PromptEnhanceSettings {
         set('pe_replace_mode', current.replaceMode);
         (getRequiredElementById('pe_send_prompt_images') as HTMLInputElement).checked = current.sendPromptImages;
         (getRequiredElementById('pe_send_active_model_context') as HTMLInputElement).checked = current.sendActiveModelContext;
-        let model = getRequiredElementById('pe_model_select') as HTMLSelectElement;
-        if (current.model && [...model.options].some((option) => option.value == current.model)) {
+        const model = getRequiredElementById('pe_model_select') as HTMLSelectElement;
+        if (current.model && [...model.options].some((option) => option.value === current.model)) {
             model.value = current.model;
         }
     }
 
     /** Persists the modal values through SavePromptEnhanceSettings. Resolves whether the save was accepted. */
     save(): Promise<boolean> {
-        let values = this.readForm();
+        const values = this.readForm();
         this.setStatus('Saving…', '');
         return new Promise((resolve) => {
             genericRequest(PE_ROUTES.saveSettings, { settings: values }, (data) => {
-                let result = peAdaptSettingsResult(data);
+                const result = peAdaptSettingsResult(data);
                 if (result.ok) {
                     this.apply(result.settings);
                     this.setStatus('Saved.', 'ok');
@@ -130,7 +133,7 @@ class PromptEnhanceSettings {
         this.setStatus('Resetting…', '');
         return new Promise((resolve) => {
             genericRequest(PE_ROUTES.resetSettings, {}, (data) => {
-                let result = peAdaptSettingsResult(data);
+                const result = peAdaptSettingsResult(data);
                 if (result.ok) {
                     this.loaded = result.settings;
                     this.populateForm();
@@ -152,14 +155,14 @@ class PromptEnhanceSettings {
     /** Replaces the model dropdown's options with one disabled explanatory entry. */
     showModelPlaceholder(select: HTMLSelectElement, text: string): void {
         select.innerHTML = '';
-        let option = new Option(text, '');
+        const option = new Option(text, '');
         option.disabled = true;
         select.add(option);
     }
 
     /** Fills the model dropdown from the backend's `/v1/models` route. Every failure lands as a disabled explanatory option plus a status message. */
     fetchModels(): Promise<void> {
-        let select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
+        const select = document.getElementById('pe_model_select') as HTMLSelectElement | null;
         if (!select) {
             return Promise.resolve();
         }
@@ -167,14 +170,14 @@ class PromptEnhanceSettings {
         this.setStatus('Fetching models…', '');
         return new Promise((resolve) => {
             genericRequest(PE_ROUTES.listModels, {}, (data) => {
-                let result = peAdaptModelsResult(data);
+                const result = peAdaptModelsResult(data);
                 if (result.ok) {
                     select.innerHTML = '';
                     select.add(new Option('-- Select a model --', ''));
-                    for (let model of result.models) {
+                    for (const model of result.models) {
                         select.add(new Option(model.name, model.id));
                     }
-                    let configured = this.effective().model;
+                    const configured = this.effective().model;
                     if (configured) {
                         select.value = configured;
                     }
@@ -195,10 +198,10 @@ class PromptEnhanceSettings {
 
     /** Builds the settings modal from SwarmUI's modal and input helpers (site.js) and appends it to the page. */
     buildModal(): HTMLElement {
-        let defaults = PE_DEFAULT_SETTINGS;
-        let field = (id: string, name: string, type: string, description: string, input: string): string =>
+        const defaults = PE_DEFAULT_SETTINGS;
+        const field = (id: string, name: string, type: string, description: string, input: string): string =>
             makeGenericPopover(id, name, type, description, '') + input;
-        let body = field('pe_base_url', 'Base URL', 'text', 'OpenAI-compatible server. A root URL or one ending in /v1 both work. If the server needs an API key, set it under User → API Keys.',
+        const body = field('pe_base_url', 'Base URL', 'text', 'OpenAI-compatible server. A root URL or one ending in /v1 both work. If the server needs an API key, set it under User → API Keys.',
                 makeTextInput(null, 'pe_base_url', '', 'Base URL', '', defaults.baseUrl, 'normal', defaults.baseUrl, false, false, true))
             + '<div class="pe-api-key-row">API Key: <span id="pe_api_key_status"></span> <a href="#" id="pe_api_key_link">Set in User → API Keys</a></div>'
             + field('pe_model_select', 'Model', 'dropdown', 'The model the backend runs. The list comes from the backend at Base URL.',
@@ -216,7 +219,7 @@ class PromptEnhanceSettings {
                 makeDropdownInput(null, 'pe_replace_mode', '', 'Apply Mode', '', [...PE_REPLACE_MODES], defaults.replaceMode, false, true, PE_REPLACE_MODES.map((mode) => PE_MODE_LABELS[mode])))
             + field('pe_send_prompt_images', 'Send Prompt Images', 'checkbox', 'Send the complete ordered SwarmUI Prompt Images set as Image 1, Image 2, and so on. Needs a vision model.',
                 makeCheckboxInput(null, 'pe_send_prompt_images', '', 'Send Prompt Images', '', defaults.sendPromptImages, false, false, true))
-            + field('pe_past_generations', 'Past Generations to Include', 'number', 'How many prior Swarm generation attempts to send with their prompts, output images, and raw metadata. 0 disables history feedback.',
+            + field('pe_past_generations', 'Past Generations to Include', 'number', 'How many of your most recent finished generations to send, each output with its resolved prompt and metadata. Above 0, new generations are recorded on the server (newest 10 kept). 0 disables it.',
                 makeNumberInput(null, 'pe_past_generations', '', 'Past Generations to Include', '', defaults.pastGenerations, PE_LIMITS.pastGenerations.min, PE_LIMITS.pastGenerations.max, 1))
             + field('pe_send_active_model_context', 'Send Active Model Context', 'checkbox', 'Send the selected base model plus active LoRA metadata, effective weights, text-encoder weights, scopes, trigger phrases, usage hints, descriptions, and tags.',
                 makeCheckboxInput(null, 'pe_send_active_model_context', '', 'Send Active Model Context', '', defaults.sendActiveModelContext, false, false, true));
@@ -229,7 +232,7 @@ class PromptEnhanceSettings {
             + '<button type="button" class="btn btn-primary basic-button" id="pe_save_btn">Save</button>'
             + '</div>'
             + modalFooter());
-        let modal = getRequiredElementById('pe_settings_modal');
+        const modal = getRequiredElementById('pe_settings_modal');
         getRequiredElementById('pe_refresh_models').addEventListener('click', () => this.fetchModels());
         getRequiredElementById('pe_api_key_link').addEventListener('click', (e) => {
             e.preventDefault();
@@ -243,13 +246,19 @@ class PromptEnhanceSettings {
 
     /** Shows whether a backend API key is saved, from SwarmUI's GetAPIKeyStatus route. The key itself never reaches the browser. */
     fetchApiKeyStatus(): void {
-        let status = document.getElementById('pe_api_key_status');
+        const status = document.getElementById('pe_api_key_status');
         if (!status) {
             return;
         }
         status.textContent = '…';
         genericRequest('GetAPIKeyStatus', { keyType: PE_API_KEY_TYPE }, (data) => {
-            status.textContent = peIsRecord(data) && typeof data.status == 'string' ? data.status : 'unknown';
+            status.textContent = 'unknown';
+            if (peIsRecord(data)) {
+                const { status: keyStatus } = data;
+                if (typeof keyStatus === 'string') {
+                    status.textContent = keyStatus;
+                }
+            }
         }, 0, (err) => {
             status.textContent = `unknown (${peErrorText(err)})`;
         });
@@ -260,7 +269,7 @@ class PromptEnhanceSettings {
         this.close();
         getRequiredElementById('usersettingstabbutton').click();
         getRequiredElementById('userinfotabbutton').click();
-        let input = document.getElementById('promptenhance_api_key');
+        const input = document.getElementById('promptenhance_api_key');
         if (input) {
             input.scrollIntoView({ block: 'center' });
             input.focus();
@@ -288,4 +297,4 @@ class PromptEnhanceSettings {
 }
 
 /** Shared extension settings. */
-let promptEnhanceSettings = new PromptEnhanceSettings();
+globalThis.promptEnhanceSettings = new PromptEnhanceSettings();

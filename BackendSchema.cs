@@ -3,89 +3,129 @@ namespace PromptEnhance;
 /// <summary>Builds the OpenAI-compatible `/v1/chat/completions` request body.</summary>
 public static class BackendSchema
 {
-    /// <summary>One image attachment.</summary>
+    /// <summary>One base64 image sent to the model.</summary>
     public class MediaContent
     {
-        /// <summary>"base64" (data URI is synthesized here) or "url" (passed through as-is).</summary>
-        public string Type;
-
-        /// <summary>The base64 image bytes, or the URL for a "url" part.</summary>
+        /// <summary>The base64 image bytes.</summary>
         public string Data;
 
-        /// <summary>MIME type for base64 parts; defaults to image/jpeg when absent.</summary>
+        /// <summary>The image MIME type, for example "image/png".</summary>
         public string MediaType;
 
         /// <summary>Stable human-facing identity, such as "Image 1" or "Past Generation 1 Output 2".</summary>
         public string Label;
     }
 
-    /// <summary>One historical output paired with the raw Swarm generation metadata that produced it.</summary>
+    /// <summary>One recorded output of a past SwarmUI generation request.</summary>
     public class PastGenerationOutput
     {
+        /// <summary>The output image.</summary>
         public MediaContent Image;
+
+        /// <summary>The prompt SwarmUI generated this output from, after wildcard and random-tag resolution.</summary>
+        public string Prompt;
+
+        /// <summary>SwarmUI's raw generation metadata JSON for this output.</summary>
         public string Metadata;
     }
 
-    /// <summary>One prior Swarm generation request and all of its outputs.</summary>
+    /// <summary>One past SwarmUI generation request and its saved outputs.</summary>
     public class PastGeneration
     {
-        public string RequestId;
-        public string Prompt;
+        /// <summary>When the request finished, in UTC.</summary>
+        public DateTime RecordedAt;
+
+        /// <summary>SwarmUI's request id. Unique only within one server run: SwarmUI restarts the counter on every launch.</summary>
+        public long SwarmRequestId;
+
+        /// <summary>The outputs, in the order SwarmUI produced them.</summary>
         public List<PastGenerationOutput> Outputs = [];
     }
 
-    /// <summary>Semantic metadata for the selected base model or one active adapter.</summary>
+    /// <summary>Semantic metadata for the selected base model or one active LoRA, as SwarmUI's model registry holds it.</summary>
     public class ModelMetadata
     {
+        /// <summary>SwarmUI's model name.</summary>
         public string Name;
+
+        /// <summary>Metadata title, if set.</summary>
         public string Title;
+
+        /// <summary>Model class id, for example "stable-diffusion-xl-v1-base".</summary>
         public string Architecture;
+
+        /// <summary>Model class display name.</summary>
         public string Class;
+
+        /// <summary>Compatibility class id.</summary>
         public string CompatClass;
+
+        /// <summary>Description text, if any.</summary>
         public string Description;
+
+        /// <summary>Usage hint, if any.</summary>
         public string UsageHint;
+
+        /// <summary>Trigger phrase, if any.</summary>
         public string TriggerPhrase;
+
+        /// <summary>Metadata tags; empty when the model has none.</summary>
         public List<string> Tags = [];
     }
 
-    /// <summary>One active LoRA plus the effective runtime values Swarm will apply.</summary>
+    /// <summary>One active LoRA plus the values SwarmUI applies to it.</summary>
     public class ActiveLora : ModelMetadata
     {
-        public double Weight = 1;
-        public double TextEncoderWeight = 1;
+        /// <summary>Model weight.</summary>
+        public double Weight;
+
+        /// <summary>Text-encoder weight.</summary>
+        public double TextEncoderWeight;
+
+        /// <summary>Section confinement id; 0 is global.</summary>
         public int ScopeId;
-        public string Scope = "Global";
+
+        /// <summary>Display name of <see cref="ScopeId"/>.</summary>
+        public string Scope;
     }
 
-    /// <summary>The selected generation stack that affects how a prompt should be written.</summary>
+    /// <summary>The selected base model and active LoRAs.</summary>
     public class ActiveModelContext
     {
+        /// <summary>The base model, or null when none is selected.</summary>
         public ModelMetadata BaseModel;
+
+        /// <summary>Active LoRAs, in SwarmUI's parameter order.</summary>
         public List<ActiveLora> Loras = [];
     }
 
-    /// <summary>Canonical multimodal context collected from SwarmUI before provider-specific translation.</summary>
+    /// <summary>Everything besides the prompt text that an enhance request sends to the model.</summary>
     public class PromptContext
     {
+        /// <summary>The Generate tab's current Prompt Images, in order.</summary>
         public List<MediaContent> PromptImages = [];
+
+        /// <summary>Past generation requests, oldest first.</summary>
         public List<PastGeneration> PastGenerations = [];
+
+        /// <summary>The active model stack, or null when not requested.</summary>
         public ActiveModelContext ActiveModel;
 
+        /// <summary>True when any image is attached.</summary>
         public bool HasImages => PromptImages.Count > 0 || PastGenerations.Exists(g => g.Outputs.Count > 0);
+
+        /// <summary>True when there is anything to send besides the prompt text.</summary>
+        public bool IsEmpty => PromptImages.Count == 0 && PastGenerations.Count == 0 && ActiveModel == null;
+    }
+
+    private static object TextPart(string text)
+    {
+        return new { type = "text", text };
     }
 
     private static object ImagePart(MediaContent media)
     {
-        string url = media.Type == "base64"
-            ? $"data:{(string.IsNullOrWhiteSpace(media.MediaType) ? "image/jpeg" : media.MediaType)};base64,{media.Data}"
-            : media.Data;
-        return new { type = "image_url", image_url = new { url } };
-    }
-
-    private static void AddLabeledImage(List<object> parts, string label, MediaContent image)
-    {
-        parts.Add(new { type = "text", text = label });
-        parts.Add(ImagePart(image));
+        return new { type = "image_url", image_url = new { url = $"data:{media.MediaType};base64,{media.Data}" } };
     }
 
     private static string ModelText(ModelMetadata model)
@@ -94,92 +134,65 @@ public static class BackendSchema
         {
             return "(none)";
         }
-        List<string> lines = [$"Name: {model.Name ?? "(unknown)"}"];
-        if (!string.IsNullOrWhiteSpace(model.Title)) lines.Add($"Title: {model.Title}");
-        if (!string.IsNullOrWhiteSpace(model.Architecture)) lines.Add($"Architecture: {model.Architecture}");
-        if (!string.IsNullOrWhiteSpace(model.Class)) lines.Add($"Class: {model.Class}");
-        if (!string.IsNullOrWhiteSpace(model.CompatClass)) lines.Add($"Compatibility class: {model.CompatClass}");
-        if (!string.IsNullOrWhiteSpace(model.TriggerPhrase)) lines.Add($"Trigger phrase: {model.TriggerPhrase}");
-        if (!string.IsNullOrWhiteSpace(model.UsageHint)) lines.Add($"Usage hint: {model.UsageHint}");
-        if (!string.IsNullOrWhiteSpace(model.Description)) lines.Add($"Description: {model.Description}");
-        if (model.Tags is { Count: > 0 }) lines.Add($"Tags: {string.Join(", ", model.Tags)}");
+        List<string> lines = [$"Name: {model.Name}"];
+        void add(string label, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"{label}: {value}");
+            }
+        }
+        add("Title", model.Title);
+        add("Architecture", model.Architecture);
+        add("Class", model.Class);
+        add("Compatibility class", model.CompatClass);
+        add("Trigger phrase", model.TriggerPhrase);
+        add("Usage hint", model.UsageHint);
+        add("Description", model.Description);
+        if (model.Tags.Count > 0)
+        {
+            lines.Add($"Tags: {string.Join(", ", model.Tags)}");
+        }
         return string.Join("\n", lines);
     }
 
-    /// <summary>Assembles provider-independent Swarm context into one ordered OpenAI-compatible multimodal user message.</summary>
-    public static object BuildChatRequest(string model, string systemPrompt, string userText, List<MediaContent> media, double temperature, int maxTokens, PromptContext context = null)
+    /// <summary>Assembles the messages array: an optional system message (omitted when blank), then one user message. The user message is the plain prompt when <paramref name="context"/> is empty, else an ordered multimodal part list that keeps current prompt images, past generations, and the active model stack in separate labeled sections.</summary>
+    public static object BuildChatRequest(string model, string systemPrompt, string userText, double temperature, int maxTokens, PromptContext context)
     {
         List<object> messages = [];
         if (!string.IsNullOrWhiteSpace(systemPrompt))
         {
             messages.Add(new { role = "system", content = systemPrompt });
         }
-
-        context ??= new PromptContext();
-        bool hasStructuredContext = context.PromptImages.Count > 0 || context.PastGenerations.Count > 0 || context.ActiveModel != null;
-
-        if (!hasStructuredContext)
+        if (context.IsEmpty)
         {
-            if (media is { Count: > 0 })
-            {
-                List<object> legacyParts = [];
-                foreach (MediaContent image in media)
-                {
-                    legacyParts.Add(ImagePart(image));
-                }
-                legacyParts.Add(new { type = "text", text = userText });
-                messages.Add(new { role = "user", content = legacyParts });
-            }
-            else
-            {
-                messages.Add(new { role = "user", content = userText });
-            }
+            messages.Add(new { role = "user", content = userText });
         }
         else
         {
-            List<object> parts = [];
-            parts.Add(new
-            {
-                type = "text",
-                text = "The following context comes from SwarmUI. Keep CURRENT PROMPT IMAGES, PAST GENERATIONS, and ACTIVE MODEL CONTEXT semantically separate. Image N always refers only to CURRENT PROMPT IMAGES. Use past generations as visual feedback, not as current reference images."
-            });
-
+            List<object> parts = [TextPart("The following context comes from SwarmUI. Keep CURRENT PROMPT IMAGES, PAST GENERATIONS, and ACTIVE MODEL CONTEXT semantically separate. Image N always refers only to CURRENT PROMPT IMAGES. Use past generations as visual feedback, not as current reference images.")];
             if (context.PromptImages.Count > 0)
             {
-                parts.Add(new { type = "text", text = "CURRENT PROMPT IMAGES" });
+                parts.Add(TextPart("CURRENT PROMPT IMAGES"));
                 foreach (MediaContent image in context.PromptImages)
                 {
-                    AddLabeledImage(parts, image.Label ?? "Prompt image", image);
+                    parts.Add(TextPart(image.Label));
+                    parts.Add(ImagePart(image));
                 }
             }
-
-            if (media is { Count: > 0 })
-            {
-                parts.Add(new { type = "text", text = "LEGACY SELECTED IMAGE CONTEXT" });
-                for (int i = 0; i < media.Count; i++)
-                {
-                    AddLabeledImage(parts, media[i].Label ?? $"Selected Image {i + 1}", media[i]);
-                }
-            }
-
             if (context.PastGenerations.Count > 0)
             {
-                parts.Add(new { type = "text", text = "PAST GENERATIONS (oldest to newest). Compare each prompt with its outputs to diagnose what is going wrong." });
-                for (int generationIndex = 0; generationIndex < context.PastGenerations.Count; generationIndex++)
+                parts.Add(TextPart("PAST GENERATIONS (oldest to newest). Compare each output's prompt with the output to diagnose what is going wrong."));
+                foreach (PastGeneration generation in context.PastGenerations)
                 {
-                    PastGeneration generation = context.PastGenerations[generationIndex];
-                    parts.Add(new { type = "text", text = $"Past Generation {generationIndex + 1}\nRequest ID: {generation.RequestId}\nPrompt: {generation.Prompt}" });
                     foreach (PastGenerationOutput output in generation.Outputs)
                     {
-                        AddLabeledImage(parts, output.Image.Label ?? $"Past Generation {generationIndex + 1} Output", output.Image);
-                        if (!string.IsNullOrWhiteSpace(output.Metadata))
-                        {
-                            parts.Add(new { type = "text", text = $"Raw Swarm metadata for {output.Image.Label}:\n{output.Metadata}" });
-                        }
+                        parts.Add(TextPart($"{output.Image.Label}\nPrompt: {output.Prompt}"));
+                        parts.Add(ImagePart(output.Image));
+                        parts.Add(TextPart($"Raw SwarmUI metadata for {output.Image.Label}:\n{output.Metadata}"));
                     }
                 }
             }
-
             if (context.ActiveModel != null)
             {
                 List<string> modelLines = ["ACTIVE MODEL CONTEXT", "Base model:", ModelText(context.ActiveModel.BaseModel)];
@@ -189,13 +202,11 @@ public static class BackendSchema
                     modelLines.Add($"Active LoRA {i + 1}:\n{ModelText(lora)}\nModel weight: {lora.Weight}\nText encoder weight: {lora.TextEncoderWeight}\nScope: {lora.Scope} ({lora.ScopeId})");
                 }
                 modelLines.Add("Account for the active generation stack when rewriting. Preserve required trigger phrases when appropriate. Avoid needlessly restating concepts already strongly supplied by active adapters, and avoid introducing prompt language that conflicts with known active conditioning.");
-                parts.Add(new { type = "text", text = string.Join("\n\n", modelLines) });
+                parts.Add(TextPart(string.Join("\n\n", modelLines)));
             }
-
-            parts.Add(new { type = "text", text = $"CURRENT PROMPT TO ENHANCE:\n{userText}" });
+            parts.Add(TextPart($"CURRENT PROMPT TO ENHANCE:\n{userText}"));
             messages.Add(new { role = "user", content = parts });
         }
-
         return new
         {
             model,

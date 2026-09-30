@@ -208,8 +208,7 @@ function write(): void {
     if (refusals.length > 0) {
         throw new Error(`refusing to update ./screenshots:\n  - ${refusals.join('\n  - ')}\nRun \`just ui-test-force\`.`);
     }
-    const ids = blobIds(shots.map((shot) => `screenshots/${shot}`));
-    const manifest: Manifest = { inputs: inputsDigest(), swarmuiPin: swarmuiPin(), shots: Object.fromEntries(shots.map((shot, index) => [shot, ids[index]!])) };
+    const manifest: Manifest = { inputs: inputsDigest(), swarmuiPin: swarmuiPin(), shots: Object.fromEntries(shots.map((shot) => [shot, contentHash(`screenshots/${shot}`)])) };
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     console.log(`[readme-shots] certified ${shots.length} screenshots in ${path.relative(repo, manifestPath)}`);
 }

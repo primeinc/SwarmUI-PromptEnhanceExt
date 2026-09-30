@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
     <PropertyGroup>
         <AssemblyName>PromptEnhance</AssemblyName>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <UseVendoredSwarmUI Condition="Exists('vendor/SwarmUI/src/SwarmUI.csproj') and !Exists('../../SwarmUI.extension.props')">true</UseVendoredSwarmUI>
     </PropertyGroup>
 

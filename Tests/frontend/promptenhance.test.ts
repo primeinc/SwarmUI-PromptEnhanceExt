@@ -16,7 +16,7 @@ const REPO = path.join(__dirname, '..', '..', '..');
 const ASSETS = path.join(REPO, 'Assets');
 const CONTRACTS_SRC = fs.readFileSync(path.join(ASSETS, 'contracts.js'), 'utf8');
 const SETTINGS_SRC = fs.readFileSync(path.join(ASSETS, 'settings.js'), 'utf8');
-const CONTEXT_SRC = fs.readFileSync(path.join(ASSETS, 'context.js'), 'utf8');
+const SWARM_INPUT_SRC = fs.readFileSync(path.join(ASSETS, 'swarminput.js'), 'utf8');
 const PROMPT_SRC = fs.readFileSync(path.join(ASSETS, 'promptenhance.js'), 'utf8');
 
 /** SwarmUI's util.js: vendored standalone workspace first, then the host layout `<SwarmUI>/src/Extensions/PromptEnhance`. */
@@ -34,24 +34,66 @@ function readHostUtilJs(): string {
 }
 const UTIL_SRC = readHostUtilJs();
 
+interface PESettingSpec {
+    type: string;
+    default: unknown;
+    min?: number;
+    max?: number;
+    enum?: string[];
+}
+
 interface PEContractFile {
     routes: Record<string, string>;
     apiKeyType: string;
     errorCategories: Record<string, string>;
     store: { dataname: string; name: string };
-    settings: Record<string, { type: string; default: unknown; min?: number; max?: number; enum?: string[] }>;
+    settings: Record<string, PESettingSpec>;
 }
 const CONTRACT: PEContractFile = JSON.parse(fs.readFileSync(path.join(REPO, 'contracts', 'pe-contract.json'), 'utf8'));
 
-/** SwarmUI's prompt region markup (src/Pages/_Generate/GenerateTab.cshtml). */
+/** The contract spec of one setting; throws when the contract has no such key. */
+function setting(key: string): PESettingSpec {
+    const spec = CONTRACT.settings[key];
+    if (spec === undefined) {
+        throw new Error(`contracts/pe-contract.json has no setting '${key}'`);
+    }
+    return spec;
+}
+
+/** The numeric bounds of one contract setting; throws when either is missing. */
+function bounds(key: string): { min: number; max: number } {
+    const { min, max } = setting(key);
+    if (min === undefined || max === undefined) {
+        throw new Error(`contract setting '${key}' has no min/max`);
+    }
+    return { min, max };
+}
+
+/** The element with the id; throws when it is absent. */
+function el(doc: Document, id: string): HTMLElement {
+    const found = doc.getElementById(id);
+    if (!found) {
+        throw new Error(`#${id} is not in the page`);
+    }
+    return found;
+}
+
+/** The array entry at the index; throws when it is absent. */
+function at<T>(items: readonly T[], index: number): T {
+    const item = items[index];
+    if (item === undefined) {
+        throw new Error(`no entry at index ${index} (length ${items.length})`);
+    }
+    return item;
+}
+
+/** SwarmUI's prompt region markup (src/Pages/_Generate/GenerateTab.cshtml) plus the model-stack parameter inputs params.js generates. */
 const PAGE_HTML = `<!DOCTYPE html><html><body>
-  <div class="current_image drag_image_target" id="current_image"></div>
-  <div id="current_image_batch"></div>
   <select id="input_model"><option value=""></option></select>
   <select id="input_loras" multiple></select>
-  <input id="input_loraweights" value="">
-  <input id="input_loratencweights" value="">
-  <input id="input_lorasectionconfinement" value="">
+  <textarea id="input_loraweights"></textarea>
+  <textarea id="input_loratencweights"></textarea>
+  <textarea id="input_lorasectionconfinement"></textarea>
   <div class="alt_prompt_region drag_image_target drag_audio_target" id="alt_prompt_region">
     <div id="alt_prompt_extra_area" class="alt_prompt_extra_area">
       <button id="alt_prompt_image_clear_button" style="display: none;">Clear Attachments</button>
@@ -66,12 +108,16 @@ const PAGE_HTML = `<!DOCTYPE html><html><body>
   </div>
 </body></html>`;
 
-/** Host functions the harness stubs in place of SwarmUI's site.js and genpage scripts. */
-const HOST_STUBS = ['genericRequest', 'showError', 'triggerChangeFor', 'genTabLayout', 'sessionReadyCallbacks'];
+/** Host globals the harness stubs in place of SwarmUI's site.js and genpage scripts. */
+const HOST_STUBS = ['genericRequest', 'showError', 'triggerChangeFor', 'genTabLayout', 'sessionReadyCallbacks', 'gen_param_types', 'isParamEnabled'];
 
+/** The global-name prefixes the extension owns. */
+const EXTENSION_PREFIXES = ['pe', 'PE_', 'promptEnhance'];
+
+/** A genericRequest call as it went over the wire: the payload's JSON form, in the Node realm. */
 interface RecordedCall {
     route: string;
-    payload: PEEnhancePayload & { settings?: Partial<PESettings>; modelName?: string; subtype?: string };
+    payload: PEEnhancePayload & { settings?: Partial<PESettings> };
 }
 
 interface BootCalls {
@@ -85,12 +131,15 @@ interface BootCalls {
 interface BootOpts {
     prompt?: string;
     settings?: Partial<PESettings>;
-    image?: { src: string };
     backendResponse?: unknown;
     routeResponses?: Record<string, unknown>;
     routeErrors?: Record<string, unknown>;
     throwingShowError?: boolean;
     genTabLayout?: SwarmGenTabLayout;
+    /** Generate-tab parameter ids params.js registered; defaults to the model stack. */
+    paramTypes?: string[];
+    /** Parameter ids whose toggle or group is off. */
+    disabledParams?: string[];
     /** When true, boot leaves `sessionReadyCallbacks` unfired; the test fires them via `fireSessionReady`. */
     holdSessionReady?: boolean;
 }
@@ -111,20 +160,10 @@ interface PESettingsSurface {
     apply(settings: Partial<PESettings>): void;
 }
 
-/** The context collector surface these tests drive. */
-interface PEContextSurface {
-    history: PEGenerationAttempt[];
-    scanHistoryDom(): void;
-    collectPromptImages(): Promise<PEMediaEntry[]>;
-    collectPastGenerations(count: number): Promise<PEPastGenerationContext[]>;
-    collectActiveModelContext(): Promise<PEActiveModelContext>;
-}
-
-/** The extension's global surface as the page sees it; `let` and `class` globals are read through the page realm. */
+/** The extension's global surface as the page sees it; `const` and `class` globals are read through the page realm. */
 interface PEGlobals {
     genTab: PEGenTabSurface;
     settings: PESettingsSurface;
-    context: PEContextSurface;
     PE_ROUTES: PERoutes;
     PE_API_KEY_TYPE: string;
     PE_LIMITS: PELimits;
@@ -134,8 +173,11 @@ interface PEGlobals {
     peNormalizeSettings: (raw: PERawSettingsInput, current: PESettings) => PESettings;
 }
 
+/** The page window with the members these tests use typed explicitly (jsdom's DOMWindow serves them from an index signature). */
 type PETestWindow = DOMWindow & {
     sessionReadyCallbacks: (() => void)[];
+    console: Console;
+    Option: typeof Option;
 };
 
 interface BootResult {
@@ -148,38 +190,53 @@ interface BootResult {
     fireSessionReady: () => Promise<void>;
 }
 
+const noop = (): void => undefined;
+
 async function boot(opts: BootOpts): Promise<BootResult> {
     const calls: BootCalls = { genericRequest: [], showError: [], alerts: [], consoleErrors: [], consoleWarns: [] };
     const dom = new JSDOM(PAGE_HTML, { runScripts: 'dangerously', url: 'http://localhost/' });
     const win = dom.window as PETestWindow;
     const doc = win.document;
-    const host = win as unknown as Record<string, unknown>;
 
-    host.genericRequest = (route: string, payload: object, onSuccess: (data: unknown) => void, _depth?: number, onError?: (err: unknown) => void) => {
-        calls.genericRequest.push({ route, payload: payload as RecordedCall['payload'] });
+    const genericRequest = (route: string, payload: object, onSuccess: (data: unknown) => void, _depth?: number, onError?: (err: unknown) => void) => {
+        calls.genericRequest.push({ route, payload: JSON.parse(JSON.stringify(payload)) as RecordedCall['payload'] });
         if (opts.routeErrors && route in opts.routeErrors) {
-            (onError ?? (() => { }))(opts.routeErrors[route]);
+            (onError ?? noop)(opts.routeErrors[route]);
             return;
         }
-        const resp = (opts.routeResponses && route in opts.routeResponses)
-            ? opts.routeResponses[route]
-            : route === 'GetPromptEnhanceSettings'
-                ? { success: true, settings: {} }
-                : route === 'DescribeModel'
-                    ? { model: { name: (payload as RecordedCall['payload']).modelName ?? '', title: 'Title', description: 'Description', usage_hint: 'Usage', trigger_phrase: `trigger:${(payload as RecordedCall['payload']).modelName ?? ''}`, tags: ['tag-a'] } }
-                    : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
+        let resp: unknown = opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' };
+        if (opts.routeResponses && route in opts.routeResponses) {
+            resp = opts.routeResponses[route];
+        }
+        else if (route === 'GetPromptEnhanceSettings') {
+            resp = { success: true, settings: {} };
+        }
         const hostError = (resp as { error?: unknown }).error;
         if (hostError) {
             // site.js genericRequest hands any response carrying `error` to the error handler, as the bare string.
-            (onError ?? (() => { }))(hostError);
+            (onError ?? noop)(hostError);
             return;
         }
         onSuccess(resp);
     };
-    host.showError = opts.throwingShowError
-        ? () => { throw new Error('host banner is broken'); }
-        : (message: string) => { calls.showError.push(message); };
-    win.alert = ((message: string) => { calls.alerts.push(message); }) as typeof win.alert;
+    const showError = opts.throwingShowError
+        ? () => {
+            throw new Error('host banner is broken');
+        }
+        : (message: string) => {
+            calls.showError.push(message);
+        };
+    Object.assign(win, {
+        genericRequest,
+        showError,
+        triggerChangeFor: noop,
+        genTabLayout: opts.genTabLayout ?? { altPromptSizeHandle: noop },
+        gen_param_types: (opts.paramTypes ?? ['model', 'loras', 'loraweights', 'loratencweights', 'lorasectionconfinement']).map((id) => ({ id })),
+        isParamEnabled: (param: SwarmParamType) => !(opts.disabledParams ?? []).includes(param.id)
+    });
+    win.alert = ((message: string) => {
+        calls.alerts.push(message);
+    }) as typeof win.alert;
     const realConsoleError = win.console.error.bind(win.console);
     win.console.error = ((...args: unknown[]) => {
         calls.consoleErrors.push(args.map(String).join(' '));
@@ -190,19 +247,12 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         calls.consoleWarns.push(args.map(String).join(' '));
         realConsoleWarn(...args);
     }) as typeof win.console.warn;
-    host.triggerChangeFor = () => { };
-    host.genTabLayout = opts.genTabLayout ?? { altPromptSizeHandle: () => { } };
     win.sessionReadyCallbacks = [];
     if (opts.prompt !== undefined) {
-        (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value = opts.prompt;
-    }
-    if (opts.image) {
-        const img = doc.createElement('img');
-        img.src = opts.image.src;
-        doc.getElementById('current_image')!.appendChild(img);
+        (el(doc, 'alt_prompt_textbox') as HTMLTextAreaElement).value = opts.prompt;
     }
 
-    for (const src of [UTIL_SRC, CONTRACTS_SRC, SETTINGS_SRC, CONTEXT_SRC, PROMPT_SRC]) {
+    for (const src of [UTIL_SRC, CONTRACTS_SRC, SETTINGS_SRC, SWARM_INPUT_SRC, PROMPT_SRC]) {
         const script = doc.createElement('script');
         script.textContent = src;
         doc.body.appendChild(script);
@@ -210,7 +260,6 @@ async function boot(opts: BootOpts): Promise<BootResult> {
     const pe = win.eval(`({
         genTab: promptEnhanceGenTab,
         settings: promptEnhanceSettings,
-        context: promptEnhanceContext,
         PE_ROUTES, PE_API_KEY_TYPE, PE_LIMITS, PE_REPLACE_MODES, PE_DEFAULT_SETTINGS,
         peAdaptSettingsResult, peNormalizeSettings
     })`) as PEGlobals;
@@ -230,7 +279,22 @@ async function boot(opts: BootOpts): Promise<BootResult> {
 }
 
 function promptValue(doc: Document): string {
-    return (doc.getElementById('alt_prompt_textbox') as HTMLTextAreaElement).value;
+    return (el(doc, 'alt_prompt_textbox') as HTMLTextAreaElement).value;
+}
+
+/** The PromptEnhanceRun payloads sent so far. */
+function runs(calls: BootCalls): RecordedCall['payload'][] {
+    return calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').map((c) => c.payload);
+}
+
+/** Attaches a Prompt Image the way SwarmUI's main.js does: an IMG with class alt-prompt-image and its data on `data-filedata`. */
+function attachPromptImage(doc: Document, filedata: string | null): void {
+    const img = doc.createElement('img');
+    img.className = 'alt-prompt-image';
+    if (filedata !== null) {
+        img.setAttribute('data-filedata', filedata);
+    }
+    el(doc, 'alt_prompt_image_area').appendChild(img);
 }
 
 const tests: { name: string; fn: () => void | Promise<void> }[] = [];
@@ -240,14 +304,12 @@ function test(name: string, fn: () => void | Promise<void>): void {
 
 test('Mounts the bar at the top of #alt_prompt_extra_area with the preview right after it', async () => {
     const { doc } = await boot({});
-    const bar = doc.getElementById('pe_button_bar');
-    assert.ok(bar, '#pe_button_bar exists after session-ready startup');
-    const area = doc.getElementById('alt_prompt_extra_area')!;
-    assert.strictEqual(area.firstElementChild, bar, '#pe_button_bar is the first child of #alt_prompt_extra_area');
-    assert.strictEqual(bar.nextElementSibling, doc.getElementById('pe_preview'), '#pe_preview follows the bar');
-    assert.strictEqual(doc.getElementById('pe_enhance_btn')!.tagName, 'BUTTON', 'Enhance is a real button');
-    assert.ok(doc.getElementById('pe_enhance_btn')!.classList.contains('basic-button'), 'Enhance uses SwarmUI button styling');
-    assert.ok(doc.getElementById('pe_settings_button'), 'the settings button is mounted');
+    const bar = el(doc, 'pe_button_bar');
+    assert.strictEqual(el(doc, 'alt_prompt_extra_area').firstElementChild, bar, '#pe_button_bar is the first child of #alt_prompt_extra_area');
+    assert.strictEqual(bar.nextElementSibling, el(doc, 'pe_preview'), '#pe_preview follows the bar');
+    assert.strictEqual(el(doc, 'pe_enhance_btn').tagName, 'BUTTON', 'Enhance is a real button');
+    assert.ok(el(doc, 'pe_enhance_btn').classList.contains('basic-button'), 'Enhance uses SwarmUI button styling');
+    assert.ok(el(doc, 'pe_settings_button'), 'the settings button is mounted');
 });
 
 test('Mounting is idempotent', async () => {
@@ -258,112 +320,83 @@ test('Mounting is idempotent', async () => {
 
 test('A real click on Enhance with an empty prompt surfaces an error and sends nothing', async () => {
     const { win, doc, calls } = await boot({ prompt: '' });
-    doc.getElementById('pe_enhance_btn')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+    el(doc, 'pe_enhance_btn').dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
     assert.strictEqual(calls.showError.length, 1, 'the click drives handleEnhance');
-    assert.ok(calls.showError[0]!.includes('prompt to enhance'), 'empty-prompt error text is surfaced');
-    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no enhance request for an empty prompt');
+    assert.ok(at(calls.showError, 0).includes('prompt to enhance'), 'empty-prompt error text is surfaced');
+    assert.strictEqual(runs(calls).length, 0, 'no enhance request for an empty prompt');
 });
 
-test('Current PromptImages are sent in exact order with explicit Image 1..N labels', async () => {
+test('With Prompt Images and Active Model off, the request is the prompt alone', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: false, sendActiveModelContext: false, pastGenerations: 3 } });
+    attachPromptImage(doc, 'data:image/png;base64,QUJD');
+    await pe.genTab.handleEnhance();
+    assert.deepStrictEqual(runs(calls), [{ prompt: 'a cat' }], 'Past Generations come from the server-side history; nothing else is sent');
+});
+
+test('Prompt Images are sent as SwarmUI promptimages: every attached image, in order, as its filedata', async () => {
     const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: true, sendActiveModelContext: false } });
-    const area = doc.getElementById('alt_prompt_image_area')!;
-    for (const raw of ['QUJD', 'REVG']) {
-        const img = doc.createElement('img');
-        img.className = 'alt-prompt-image';
-        img.dataset.filedata = `data:image/png;base64,${raw}`;
-        area.appendChild(img);
-    }
+    attachPromptImage(doc, 'data:image/png;base64,QUJD');
+    attachPromptImage(doc, 'inputs/2026-09-29/ref.png');
     await pe.genTab.handleEnhance();
-    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1, 'one enhance request');
-    const images = runs[0]!.payload.context!.promptImages;
-    assert.deepStrictEqual(images.map((image) => image.label), ['Image 1', 'Image 2'], 'ordinal identity is explicit');
-    assert.deepStrictEqual(images.map((image) => image.data), ['QUJD', 'REVG'], 'DOM/PromptImages order is preserved');
+    assert.deepStrictEqual(runs(calls), [{ prompt: 'a cat', swarmInput: { promptimages: ['data:image/png;base64,QUJD', 'inputs/2026-09-29/ref.png'] } }]);
 });
 
-test('A current PromptImage with no Swarm media source fails instead of being silently dropped', async () => {
+test('A Prompt Image with no data fails the enhance instead of being dropped', async () => {
     const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: true, sendActiveModelContext: false } });
-    const img = doc.createElement('img');
-    img.className = 'alt-prompt-image';
-    doc.getElementById('alt_prompt_image_area')!.appendChild(img);
+    attachPromptImage(doc, 'data:image/png;base64,QUJD');
+    attachPromptImage(doc, null);
     await pe.genTab.handleEnhance();
-    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no backend call with incomplete requested context');
-    assert.ok(calls.showError.some((message) => message.includes('Image 1')), 'the missing image is named in the error');
+    assert.strictEqual(runs(calls).length, 0, 'no backend call with incomplete requested context');
+    assert.ok(calls.showError.some((message) => message.includes('Image 2')), 'the image without data is named in the error');
 });
 
-test('No current PromptImages produces an explicit empty current-image context', async () => {
-    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
+test('Send Prompt Images with none attached sends an empty swarmInput, as SwarmUI omits promptimages', async () => {
+    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: true, sendActiveModelContext: false } });
     await pe.genTab.handleEnhance();
-    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1);
-    assert.deepStrictEqual(runs[0]!.payload.context!.promptImages, []);
+    assert.deepStrictEqual(runs(calls), [{ prompt: 'a cat', swarmInput: {} }]);
 });
 
-test('Past generations are grouped by exact request_id and keep every output plus raw metadata', async () => {
-    const { doc, calls, pe } = await boot({ prompt: 'new prompt', settings: { pastGenerations: 1, sendActiveModelContext: false } });
-    const batch = doc.getElementById('current_image_batch')!;
-    const meta0 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 1 }, sui_extra_data: { original_prompt: 'unexpanded {choice}' } });
-    const meta1 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 2 }, sui_extra_data: { original_prompt: 'unexpanded {choice}' } });
-    for (const [index, raw, metadata] of [[0, 'QUJD', meta0], [1, 'REVG', meta1]] as const) {
-        const block = doc.createElement('div');
-        block.className = 'image-block';
-        block.dataset.request_id = '77';
-        block.dataset.batch_id = `77_${index}`;
-        block.dataset.src = `data:image/png;base64,${raw}`;
-        block.dataset.metadata = metadata;
-        batch.appendChild(block);
-    }
-    pe.context.scanHistoryDom();
-    await pe.genTab.handleEnhance();
-    const history = calls.genericRequest.find((c) => c.route === 'PromptEnhanceRun')!.payload.context!.pastGenerations;
-    assert.strictEqual(history.length, 1);
-    assert.strictEqual(history[0]!.requestId, '77');
-    assert.strictEqual(history[0]!.prompt, 'old prompt');
-    assert.deepStrictEqual(history[0]!.outputs.map((output) => output.image.label), ['Past Generation 1 Output 1', 'Past Generation 1 Output 2']);
-    assert.deepStrictEqual(history[0]!.outputs.map((output) => output.metadata), [meta0, meta1]);
-});
-
-test('Active model context carries model metadata and effective LoRA model/TEnc/scope values', async () => {
-    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: true } });
-    const model = doc.getElementById('input_model') as HTMLSelectElement;
-    model.add(new Option('base-model', 'base-model'));
+test('Active model context sends the enabled model-stack parameters exactly as getInputVal reads them', async () => {
+    const { win, doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: false, sendActiveModelContext: true }, disabledParams: ['lorasectionconfinement'] });
+    const model = el(doc, 'input_model') as HTMLSelectElement;
+    model.add(new win.Option('base-model', 'base-model'));
     model.value = 'base-model';
-    const loras = doc.getElementById('input_loras') as HTMLSelectElement;
+    const loras = el(doc, 'input_loras') as HTMLSelectElement;
     for (const name of ['lora-a', 'lora-b']) {
-        const option = new Option(name, name, true, true);
-        loras.add(option);
+        loras.add(new win.Option(name, name, true, true));
     }
-    (doc.getElementById('input_loraweights') as HTMLInputElement).value = '0.8';
-    (doc.getElementById('input_loratencweights') as HTMLInputElement).value = '0.5';
-    (doc.getElementById('input_lorasectionconfinement') as HTMLInputElement).value = '5,0';
+    (el(doc, 'input_loraweights') as HTMLTextAreaElement).value = '0.8,1';
+    (el(doc, 'input_loratencweights') as HTMLTextAreaElement).value = '0.5';
+    (el(doc, 'input_lorasectionconfinement') as HTMLTextAreaElement).value = '5,0';
     await pe.genTab.handleEnhance();
-    const active = calls.genericRequest.find((c) => c.route === 'PromptEnhanceRun')!.payload.context!.activeModel!;
-    assert.strictEqual(active.baseModel!.name, 'base-model');
-    assert.strictEqual(active.baseModel!.triggerPhrase, 'trigger:base-model');
-    assert.strictEqual(active.loras[0]!.weight, 0.8);
-    assert.strictEqual(active.loras[0]!.textEncoderWeight, 0.5);
-    assert.strictEqual(active.loras[0]!.scope, 'Base');
-    assert.strictEqual(active.loras[1]!.weight, 1, 'missing model weight uses Swarm runtime default');
-    assert.strictEqual(active.loras[1]!.textEncoderWeight, 1, 'missing TEnc weight falls back to the effective model weight');
-    assert.strictEqual(active.loras[1]!.scope, 'Global');
+    assert.deepStrictEqual(runs(calls), [{
+        prompt: 'a cat',
+        swarmInput: { model: 'base-model', loras: ['lora-a', 'lora-b'], loraweights: '0.8,1', loratencweights: '0.5' }
+    }], 'the disabled section-confinement parameter is left out, as getGenInput leaves it out');
+});
+
+test('Parameters SwarmUI has not registered are not read', async () => {
+    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: true }, paramTypes: ['model'] });
+    await pe.genTab.handleEnhance();
+    assert.deepStrictEqual(runs(calls), [{ prompt: 'a cat', swarmInput: { model: '' } }]);
 });
 
 test('Loading clears on backend failure and the server error is surfaced', async () => {
     const { doc, calls, pe } = await boot({ prompt: 'a cat', backendResponse: { success: false, error: 'boom' } });
     await pe.genTab.handleEnhance();
     assert.strictEqual(calls.showError.length, 1, 'backend failure surfaced');
-    assert.ok(calls.showError[0]!.includes('boom'), 'the classified server error text is surfaced');
-    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
-    assert.strictEqual(doc.getElementById('pe_enhance_loading')!.style.display, 'none', 'loading indicator hidden');
+    assert.ok(at(calls.showError, 0).includes('boom'), 'the classified server error text is surfaced');
+    assert.strictEqual((el(doc, 'pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
+    assert.strictEqual(el(doc, 'pe_enhance_loading').style.display, 'none', 'loading indicator hidden');
 });
 
 test('Preview mode does not touch the prompt until Apply', async () => {
     const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'preview' } });
     pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED');
     assert.strictEqual(promptValue(doc), 'ORIGINAL', 'prompt untouched');
-    assert.strictEqual(doc.getElementById('pe_preview')!.style.display, 'block', 'preview shown');
-    assert.strictEqual(doc.getElementById('pe_preview_text')!.textContent, 'ENHANCED', 'preview shows the enhanced text');
-    doc.getElementById('pe_preview_apply')!.click();
+    assert.strictEqual(el(doc, 'pe_preview').style.display, 'block', 'preview shown');
+    assert.strictEqual(el(doc, 'pe_preview_text').textContent, 'ENHANCED', 'preview shows the enhanced text');
+    el(doc, 'pe_preview_apply').click();
     assert.strictEqual(promptValue(doc), 'ENHANCED', 'Apply replaces the prompt');
     assert.strictEqual(pe.genTab.lastOriginal, 'ORIGINAL', 'Apply stashes the original for Restore');
 });
@@ -378,20 +411,19 @@ test('Replace mode replaces the prompt and Restore brings the original back', as
     const { doc, pe } = await boot({ prompt: 'ORIGINAL', settings: { replaceMode: 'replace_with_restore' } });
     pe.genTab.applyEnhancement('ORIGINAL', 'ENHANCED');
     assert.strictEqual(promptValue(doc), 'ENHANCED', 'prompt replaced');
-    assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'inline-block', 'Restore shown');
-    doc.getElementById('pe_restore_btn')!.click();
+    assert.strictEqual(el(doc, 'pe_restore_btn').style.display, 'inline-block', 'Restore shown');
+    el(doc, 'pe_restore_btn').click();
     assert.strictEqual(promptValue(doc), 'ORIGINAL', 'Restore returns the original');
-    assert.strictEqual(doc.getElementById('pe_restore_btn')!.style.display, 'none', 'Restore hidden again');
+    assert.strictEqual(el(doc, 'pe_restore_btn').style.display, 'none', 'Restore hidden again');
 });
 
 test('Restore brings back the prompt exactly as typed, while the backend gets it trimmed', async () => {
     const typed = '  a cat on a mat \n';
     const { doc, calls, pe } = await boot({ prompt: typed, settings: { replaceMode: 'replace_with_restore' } });
     await pe.genTab.handleEnhance();
-    const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs[0]!.payload.prompt, 'a cat on a mat', 'the backend gets the trimmed prompt');
+    assert.strictEqual(at(runs(calls), 0).prompt, 'a cat on a mat', 'the backend gets the trimmed prompt');
     assert.strictEqual(promptValue(doc), 'ENHANCED PROMPT', 'the prompt is replaced');
-    doc.getElementById('pe_restore_btn')!.click();
+    el(doc, 'pe_restore_btn').click();
     assert.strictEqual(promptValue(doc), typed, 'Restore returns the untrimmed original');
 });
 
@@ -401,17 +433,19 @@ test('Replace mode keeps the TRUE original across a second enhance', async () =>
     pe.genTab.applyEnhancement('ENHANCED1', 'ENHANCED2');
     assert.strictEqual(promptValue(doc), 'ENHANCED2', 'second enhance replaces the prompt');
     assert.strictEqual(pe.genTab.lastOriginal, 'ORIGINAL', 'the earliest original is kept');
-    doc.getElementById('pe_restore_btn')!.click();
+    el(doc, 'pe_restore_btn').click();
     assert.strictEqual(promptValue(doc), 'ORIGINAL', 'Restore returns the true original');
 });
 
-test('Every window global the extension adds is pe-prefixed', async () => {
+test('Every window global the extension adds carries an extension prefix', async () => {
     const hostOnly = new JSDOM(`<!DOCTYPE html><body><script>${UTIL_SRC}</script></body>`, { runScripts: 'dangerously' }).window;
     const baseline = new Set(Object.keys(hostOnly));
     const { win } = await boot({});
-    const added = Object.keys(win).filter((key) => !baseline.has(key) && !HOST_STUBS.includes(key));
-    assert.ok(added.includes('peAdaptSettingsResult'), 'control: extension function declarations are visible on window');
-    assert.deepStrictEqual(added.filter((key) => !key.startsWith('pe')), [], 'no unprefixed extension globals on window');
+    const added = Object.keys(win).filter((key) => !(baseline.has(key) || HOST_STUBS.includes(key)));
+    for (const expected of ['PE_ROUTES', 'peAdaptSettingsResult', 'promptEnhanceSettings', 'promptEnhanceSwarmInput']) {
+        assert.ok(added.includes(expected), `control: ${expected} is visible on window`);
+    }
+    assert.deepStrictEqual(added.filter((key) => !EXTENSION_PREFIXES.some((prefix) => key.startsWith(prefix))), [], 'no unprefixed extension globals on window');
 });
 
 test('Contract: defaults, routes, API key type, replace modes, and bounds match contracts/pe-contract.json exactly', async () => {
@@ -424,12 +458,12 @@ test('Contract: defaults, routes, API key type, replace modes, and bounds match 
     assert.deepStrictEqual({ ...pe.settings.effective() }, expectedDefaults, 'boot-time effective settings equal the contract defaults');
     assert.deepStrictEqual({ ...pe.PE_ROUTES }, CONTRACT.routes, 'routes equal the contract');
     assert.strictEqual(pe.PE_API_KEY_TYPE, CONTRACT.apiKeyType, 'API key type equals the contract');
-    assert.deepStrictEqual([...pe.PE_REPLACE_MODES], CONTRACT.settings.replaceMode!.enum, 'replace modes equal the contract enum');
+    assert.deepStrictEqual([...pe.PE_REPLACE_MODES], setting('replaceMode').enum, 'replace modes equal the contract enum');
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pe.PE_LIMITS)), {
-        timeoutSeconds: { min: CONTRACT.settings.timeoutSeconds!.min, max: CONTRACT.settings.timeoutSeconds!.max },
-        temperature: { min: CONTRACT.settings.temperature!.min, max: CONTRACT.settings.temperature!.max },
-        maxTokens: { min: CONTRACT.settings.maxTokens!.min, max: CONTRACT.settings.maxTokens!.max },
-        pastGenerations: { min: CONTRACT.settings.pastGenerations!.min, max: CONTRACT.settings.pastGenerations!.max }
+        timeoutSeconds: bounds('timeoutSeconds'),
+        temperature: bounds('temperature'),
+        maxTokens: bounds('maxTokens'),
+        pastGenerations: bounds('pastGenerations')
     }, 'bounds equal the contract');
 });
 
@@ -437,9 +471,9 @@ test('Contract: peNormalizeSettings clamps numbers to the contract bounds and ke
     const { pe } = await boot({});
     const current = pe.settings.effective();
     const clamped = pe.peNormalizeSettings({ timeoutSeconds: '999999', temperature: '9.5', maxTokens: '-5', baseUrl: '  http://box:8080/v1  ', model: '' }, { ...current, model: 'stored-model' });
-    assert.strictEqual(clamped.timeoutSeconds, CONTRACT.settings.timeoutSeconds!.max, 'timeout clamps to the max');
-    assert.strictEqual(clamped.temperature, CONTRACT.settings.temperature!.max, 'temperature clamps to the max');
-    assert.strictEqual(clamped.maxTokens, CONTRACT.settings.maxTokens!.min, 'maxTokens clamps to the floor');
+    assert.strictEqual(clamped.timeoutSeconds, bounds('timeoutSeconds').max, 'timeout clamps to the max');
+    assert.strictEqual(clamped.temperature, bounds('temperature').max, 'temperature clamps to the max');
+    assert.strictEqual(clamped.maxTokens, bounds('maxTokens').min, 'maxTokens clamps to the floor');
     assert.strictEqual(clamped.baseUrl, 'http://box:8080/v1', 'base URL is trimmed');
     assert.strictEqual(clamped.model, 'stored-model', 'an empty model selection keeps the stored model');
     const kept = pe.peNormalizeSettings({ timeoutSeconds: 'ninety', replaceMode: 'bogus' }, current);
@@ -449,10 +483,10 @@ test('Contract: peNormalizeSettings clamps numbers to the contract bounds and ke
 
 test('Contract: the settings adapter accepts every contract replace mode', async () => {
     const { pe } = await boot({});
-    for (const mode of CONTRACT.settings.replaceMode!.enum!) {
+    for (const mode of setting('replaceMode').enum ?? []) {
         const result = pe.peAdaptSettingsResult({ success: true, settings: { replaceMode: mode } });
         assert.ok(result.ok, `adapter accepts '${mode}'`);
-        assert.strictEqual((result as { ok: true; settings: Partial<PESettings> }).settings.replaceMode, mode, `adapter passes '${mode}' through`);
+        assert.strictEqual(result.settings.replaceMode, mode, `adapter passes '${mode}' through`);
     }
 });
 
@@ -473,7 +507,7 @@ test('Settings load failure keeps the defaults, is logged, and Enhance still wor
     assert.ok(calls.consoleErrors.some((line) => line.includes('Failed to load settings')), 'the failure is logged');
     assert.strictEqual(pe.settings.effective().baseUrl, 'http://localhost:11434', 'defaults stay in effect');
     await pe.genTab.handleEnhance();
-    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 1, 'Enhance still sends');
+    assert.strictEqual(runs(calls).length, 1, 'Enhance still sends');
     assert.strictEqual(calls.showError.length, 0, 'no error banner');
 });
 
@@ -503,7 +537,15 @@ test('Nothing mounts and no API call is made until SwarmUI signals the session i
 
 test('Every change to the extension UI height asks SwarmUI to re-offset the prompt region', async () => {
     let relayouts = 0;
-    const { doc, pe } = await boot({ prompt: 'a cat', settings: { replaceMode: 'preview' }, genTabLayout: { altPromptSizeHandle: () => { relayouts++; } } });
+    const { doc, pe } = await boot({
+        prompt: 'a cat',
+        settings: { replaceMode: 'preview' },
+        genTabLayout: {
+            altPromptSizeHandle: () => {
+                relayouts += 1;
+            }
+        }
+    });
     assert.ok(relayouts > 0, 'mounting calls genTabLayout.altPromptSizeHandle()');
     const expectRelayout = async (action: string, run: () => void | Promise<void>) => {
         const before = relayouts;
@@ -511,16 +553,15 @@ test('Every change to the extension UI height asks SwarmUI to re-offset the prom
         assert.ok(relayouts > before, `${action} calls genTabLayout.altPromptSizeHandle()`);
     };
     await expectRelayout('opening the preview', () => pe.genTab.handleEnhance());
-    assert.strictEqual(doc.getElementById('pe_preview')!.style.display, 'block', 'the preview is open');
-    await expectRelayout('applying the preview', () => doc.getElementById('pe_preview_apply')!.click());
-    await expectRelayout('restoring', () => doc.getElementById('pe_restore_btn')!.click());
+    assert.strictEqual(el(doc, 'pe_preview').style.display, 'block', 'the preview is open');
+    await expectRelayout('applying the preview', () => el(doc, 'pe_preview_apply').click());
+    await expectRelayout('restoring', () => el(doc, 'pe_restore_btn').click());
 });
 
 test('An error still reaches the user when the host showError itself throws', async () => {
     const { calls, pe } = await boot({ throwingShowError: true });
     pe.genTab.showError('the backend is on fire');
-    assert.strictEqual(calls.alerts.length, 1, 'the alert fallback fires');
-    assert.strictEqual(calls.alerts[0], 'the backend is on fire', 'the message survives the fallback');
+    assert.deepStrictEqual(calls.alerts, ['the backend is on fire'], 'the alert fallback fires with the message');
     assert.ok(calls.consoleErrors.some((line) => line.includes('host showError failed')), 'the host failure is logged');
 });
 
@@ -530,8 +571,9 @@ test('An error still reaches the user when the host showError itself throws', as
         try {
             await t.fn();
             console.log(`  ok   ${t.name}`);
-        } catch (err) {
-            failed++;
+        }
+        catch (err) {
+            failed += 1;
             console.log(`  FAIL ${t.name}\n       ${err instanceof Error && err.stack ? err.stack : String(err)}`);
         }
     }
