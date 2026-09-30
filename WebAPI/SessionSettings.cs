@@ -5,7 +5,7 @@ using SwarmUI.WebAPI;
 
 namespace PromptEnhance.WebAPI;
 
-/// <summary>Settings persistence for the eight-key settings schema, stored per-user through User.GetGenericData/SaveGenericData. Reads merge stored values over <see cref="Defaults"/> key-by-key.</summary>
+/// <summary>Settings persistence for the ten-key settings schema, stored per-user through User.GetGenericData/SaveGenericData. Reads merge stored values over <see cref="Defaults"/> key-by-key.</summary>
 [API.APIClass("PromptEnhance extension: the per-user settings (backend Base URL, model, prompt, sampling, and apply mode).")]
 public class SessionSettings
 {
@@ -26,12 +26,14 @@ public class SessionSettings
         ["temperature"] = 0.7,
         ["maxTokens"] = 1024,
         ["sendSelectedImage"] = false,
+        ["pastGenerations"] = 0,
+        ["sendActiveModelContext"] = false,
         ["replaceMode"] = "preview"
     };
 
     private static readonly string[] KnownKeys =
     [
-        "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "replaceMode"
+        "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "pastGenerations", "sendActiveModelContext", "replaceMode"
     ];
 
     /// <summary>Parses the stored settings blob, treating unparseable data as absent.</summary>
@@ -87,6 +89,8 @@ public class SessionSettings
                 "temperature": 0.7,
                 "maxTokens": 1024,
                 "sendSelectedImage": false,
+                "pastGenerations": 0,
+                "sendActiveModelContext": false,
                 "replaceMode": "preview" // or "append", "replace_with_restore"
             },
             "recovered": true // only when the stored settings were corrupt and defaults were applied
@@ -129,7 +133,7 @@ public class SessionSettings
             // on failure: "success": false, "error": "Base URL must be a valid http(s) URL ...", "error_id": "generic"
         """)]
     public static Task<JObject> SavePromptEnhanceSettings(
-        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl (absolute http(s) URL; a trailing /v1 is accepted), model (string, empty for none), timeoutSeconds (integer 1-3600), systemPrompt (string), temperature (number 0-2), maxTokens (integer >= 1), sendSelectedImage (boolean), replaceMode ('preview', 'append', or 'replace_with_restore').")] JObject raw,
+        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl, model, timeoutSeconds, systemPrompt, temperature, maxTokens, sendSelectedImage, pastGenerations (integer 0-10), sendActiveModelContext (boolean), and replaceMode.")] JObject raw,
         Session session)
     {
         try
@@ -249,6 +253,19 @@ public class SessionSettings
             {
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send selected image must be a boolean (true or false).");
             }
+        }
+        JToken pastGenerations = incoming["pastGenerations"];
+        if (pastGenerations != null && pastGenerations.Type != JTokenType.Null)
+        {
+            if (pastGenerations.Type != JTokenType.Integer || pastGenerations.Value<long>() < 0 || pastGenerations.Value<long>() > 10)
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Past generations must be a whole number between 0 and 10.");
+            }
+        }
+        JToken sendActiveModelContext = incoming["sendActiveModelContext"];
+        if (sendActiveModelContext != null && sendActiveModelContext.Type != JTokenType.Null && sendActiveModelContext.Type != JTokenType.Boolean)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send active model context must be a boolean (true or false).");
         }
         JToken replaceMode = incoming["replaceMode"];
         if (replaceMode != null && replaceMode.Type != JTokenType.Null)
