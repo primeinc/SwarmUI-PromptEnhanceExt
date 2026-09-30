@@ -257,15 +257,17 @@ public class BackendClient
         int maxTokens = settings["maxTokens"]?.Value<int?>() ?? 1024;
         int timeoutSec = ResolveTimeoutSeconds(settings);
         List<BackendSchema.MediaContent> media;
+        BackendSchema.PromptContext context;
         try
         {
             media = ParseMedia(raw?["media"] as JArray);
+            context = ParseContext(raw?["context"] as JObject);
         }
         catch (ArgumentException ex)
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
         }
-        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey);
+        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey, context);
     }
 
     /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
