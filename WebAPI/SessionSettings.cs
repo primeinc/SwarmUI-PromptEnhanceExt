@@ -25,7 +25,7 @@ public class SessionSettings
         ["systemPrompt"] = "You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.",
         ["temperature"] = 0.7,
         ["maxTokens"] = 1024,
-        ["sendSelectedImage"] = false,
+        ["sendPromptImages"] = false,
         ["pastGenerations"] = 0,
         ["sendActiveModelContext"] = false,
         ["replaceMode"] = "preview"
@@ -33,7 +33,7 @@ public class SessionSettings
 
     private static readonly string[] KnownKeys =
     [
-        "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendSelectedImage", "pastGenerations", "sendActiveModelContext", "replaceMode"
+        "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendPromptImages", "pastGenerations", "sendActiveModelContext", "replaceMode"
     ];
 
     /// <summary>Parses the stored settings blob, treating unparseable data as absent.</summary>
@@ -88,7 +88,7 @@ public class SessionSettings
                 "systemPrompt": "You are a prompt enhancer ...",
                 "temperature": 0.7,
                 "maxTokens": 1024,
-                "sendSelectedImage": false,
+                "sendPromptImages": false,
                 "pastGenerations": 0,
                 "sendActiveModelContext": false,
                 "replaceMode": "preview" // or "append", "replace_with_restore"
@@ -133,7 +133,7 @@ public class SessionSettings
             // on failure: "success": false, "error": "Base URL must be a valid http(s) URL ...", "error_id": "generic"
         """)]
     public static Task<JObject> SavePromptEnhanceSettings(
-        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl, model, timeoutSeconds, systemPrompt, temperature, maxTokens, sendSelectedImage, pastGenerations (integer 0-10), sendActiveModelContext (boolean), and replaceMode.")] JObject raw,
+        [API.APIParameter("The request body. Its `settings` object holds any subset of: baseUrl, model, timeoutSeconds, systemPrompt, temperature, maxTokens, sendPromptImages, pastGenerations (integer 0-10), sendActiveModelContext (boolean), and replaceMode.")] JObject raw,
         Session session)
     {
         try
@@ -246,12 +246,12 @@ public class SessionSettings
                 return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Temperature must be a number between 0 and 2.");
             }
         }
-        JToken sendSelectedImage = incoming["sendSelectedImage"];
-        if (sendSelectedImage != null && sendSelectedImage.Type != JTokenType.Null)
+        JToken sendPromptImages = incoming["sendPromptImages"];
+        if (sendPromptImages != null && sendPromptImages.Type != JTokenType.Null)
         {
-            if (sendSelectedImage.Type != JTokenType.Boolean)
+            if (sendPromptImages.Type != JTokenType.Boolean)
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send selected image must be a boolean (true or false).");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Send prompt images must be a boolean (true or false).");
             }
         }
         JToken pastGenerations = incoming["pastGenerations"];
