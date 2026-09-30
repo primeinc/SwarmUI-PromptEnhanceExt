@@ -271,13 +271,13 @@ public class BackendClient
     }
 
     /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
-    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null)
+    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null, BackendSchema.PromptContext context = null)
     {
         if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
         {
             return UnsendableKeyError();
         }
-        object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
+        object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens, context);
         string json = JsonSerializer.Serialize(requestBody);
         try
         {
@@ -296,7 +296,8 @@ public class BackendClient
             }
             if (!response.IsSuccessStatusCode)
             {
-                PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
+                bool carriedImages = media is { Count: > 0 } || context?.HasImages == true;
+                PromptEnhanceErrorCategory category = carriedImages && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
                     ? PromptEnhanceErrorCategory.UnsupportedImage
                     : ErrorHandler.CategorizeHttpStatus(response.StatusCode);
                 return PromptEnhanceAPI.CreateErrorResponse(category, PromptEnhanceAPI.ExtractErrorMessage(body));
@@ -342,7 +343,8 @@ public class BackendClient
             {
                 Type = item["type"]?.ToString() ?? "base64",
                 Data = data,
-                MediaType = item["mediaType"]?.ToString()
+                MediaType = item["mediaType"]?.ToString(),
+                Label = item["label"]?.ToString()
             });
         }
         return result;
