@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "build:frontend": "tsc -p Frontend",
-    "check:frontend-parity": "tsc -p Frontend && git diff --exit-code -- Assets/contracts.js Assets/settings.js Assets/promptenhance.js",
+    "check:frontend-parity": "tsc -p Frontend && git diff --exit-code -- Assets/contracts.js Assets/settings.js Assets/context.js Assets/promptenhance.js",
     "test:frontend": "tsc -p Tests/frontend && node Tests/frontend/out/promptenhance.test.js",
     "typecheck:ui": "tsc -p Tests/ui",
     "test:ui": "playwright test -c Tests/ui",
