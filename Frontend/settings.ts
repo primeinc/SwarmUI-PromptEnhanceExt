@@ -75,6 +75,8 @@ class PromptEnhanceSettings {
             temperature: value('pe_temperature'),
             maxTokens: value('pe_max_tokens'),
             sendSelectedImage: (getRequiredElementById('pe_send_image') as HTMLInputElement).checked,
+            pastGenerations: value('pe_past_generations'),
+            sendActiveModelContext: (getRequiredElementById('pe_send_active_model_context') as HTMLInputElement).checked,
             replaceMode: value('pe_replace_mode')
         }, this.effective());
     }
@@ -90,8 +92,10 @@ class PromptEnhanceSettings {
         set('pe_system_prompt', current.systemPrompt);
         set('pe_temperature', current.temperature);
         set('pe_max_tokens', current.maxTokens);
+        set('pe_past_generations', current.pastGenerations);
         set('pe_replace_mode', current.replaceMode);
         (getRequiredElementById('pe_send_image') as HTMLInputElement).checked = current.sendSelectedImage;
+        (getRequiredElementById('pe_send_active_model_context') as HTMLInputElement).checked = current.sendActiveModelContext;
         let model = getRequiredElementById('pe_model_select') as HTMLSelectElement;
         if (current.model && [...model.options].some((option) => option.value == current.model)) {
             model.value = current.model;
@@ -210,8 +214,12 @@ class PromptEnhanceSettings {
                 makeNumberInput(null, 'pe_timeout', '', 'Timeout (s)', '', defaults.timeoutSeconds, PE_LIMITS.timeoutSeconds.min, PE_LIMITS.timeoutSeconds.max, 1))
             + field('pe_replace_mode', 'Apply Mode', 'dropdown', 'What Enhance does with the result: show it for Apply/Cancel, append it below the prompt, or replace the prompt with a Restore button.',
                 makeDropdownInput(null, 'pe_replace_mode', '', 'Apply Mode', '', [...PE_REPLACE_MODES], defaults.replaceMode, false, true, PE_REPLACE_MODES.map((mode) => PE_MODE_LABELS[mode])))
-            + field('pe_send_image', 'Send Selected Image', 'checkbox', 'Attach the currently selected image to the request. Needs a vision model.',
-                makeCheckboxInput(null, 'pe_send_image', '', 'Send Selected Image', '', defaults.sendSelectedImage, false, false, true));
+            + field('pe_send_image', 'Send Selected Image', 'checkbox', 'Attach the currently selected Generate-tab output image in addition to current Prompt Images. Needs a vision model.',
+                makeCheckboxInput(null, 'pe_send_image', '', 'Send Selected Image', '', defaults.sendSelectedImage, false, false, true))
+            + field('pe_past_generations', 'Past Generations to Include', 'number', 'How many prior Swarm generation attempts to send with their prompts, output images, and raw metadata. 0 disables history feedback.',
+                makeNumberInput(null, 'pe_past_generations', '', 'Past Generations to Include', '', defaults.pastGenerations, PE_LIMITS.pastGenerations.min, PE_LIMITS.pastGenerations.max, 1))
+            + field('pe_send_active_model_context', 'Send Active Model Context', 'checkbox', 'Send the selected base model plus active LoRA metadata, effective weights, text-encoder weights, scopes, trigger phrases, usage hints, descriptions, and tags.',
+                makeCheckboxInput(null, 'pe_send_active_model_context', '', 'Send Active Model Context', '', defaults.sendActiveModelContext, false, false, true));
         document.body.insertAdjacentHTML('beforeend', modalHeader('pe_settings_modal', 'PromptEnhance Settings')
             + `<div class="modal-body">${body}</div>`
             + '<div class="modal-footer">'
