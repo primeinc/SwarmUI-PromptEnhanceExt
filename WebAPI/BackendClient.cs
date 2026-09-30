@@ -162,6 +162,18 @@ public class BackendClient
         """)]
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
+        List<BackendSchema.MediaContent> media;
+        BackendSchema.PromptContext context;
+        try
+        {
+            media = ParseMedia(raw?["media"] as JArray);
+            context = ParseContext(raw?["context"]);
+        }
+        catch (ArgumentException ex)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
+        }
+
         JObject error = null;
         (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
@@ -256,17 +268,6 @@ public class BackendClient
         double temperature = settings["temperature"]?.Value<double?>() ?? 0.7;
         int maxTokens = settings["maxTokens"]?.Value<int?>() ?? 1024;
         int timeoutSec = ResolveTimeoutSeconds(settings);
-        List<BackendSchema.MediaContent> media;
-        BackendSchema.PromptContext context;
-        try
-        {
-            media = ParseMedia(raw?["media"] as JArray);
-            context = ParseContext(raw?["context"] as JObject);
-        }
-        catch (ArgumentException ex)
-        {
-            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
-        }
         return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey, context);
     }
 
@@ -325,7 +326,7 @@ public class BackendClient
     }
 
     /// <summary>Parses the canonical Swarm context payload.</summary>
-    public static BackendSchema.PromptContext ParseContext(JObject context) => PromptContextParser.Parse(context);
+    public static BackendSchema.PromptContext ParseContext(JToken context) => PromptContextParser.Parse(context);
 
     /// <summary>Parses the request's media array. A present-but-dataless entry throws ArgumentException.</summary>
     public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
