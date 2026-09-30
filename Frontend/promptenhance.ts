@@ -177,11 +177,21 @@ class PromptEnhanceGenTab {
         this.setLoading(true);
         this.hidePreview();
         try {
-            let payload: PEEnhancePayload = { prompt: original.trim() };
-            if (promptEnhanceSettings.effective().sendSelectedImage) {
+            let settings = promptEnhanceSettings.effective();
+            let payload: PEEnhancePayload = {
+                prompt: original.trim(),
+                context: {
+                    promptImages: await promptEnhanceContext.collectPromptImages(),
+                    pastGenerations: await promptEnhanceContext.collectPastGenerations(settings.pastGenerations)
+                }
+            };
+            if (settings.sendActiveModelContext) {
+                payload.context!.activeModel = await promptEnhanceContext.collectActiveModelContext();
+            }
+            if (settings.sendSelectedImage) {
                 let image = await this.getSelectedImage();
                 if (image) {
-                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType }];
+                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType, label: 'Selected Generate-tab Image' }];
                 }
             }
             let result = await this.enhanceRequest(payload);
@@ -236,6 +246,7 @@ class PromptEnhanceGenTab {
     /** Session-ready startup: mount the controls and load settings. */
     async start(): Promise<void> {
         this.mount();
+        promptEnhanceContext.start();
         await promptEnhanceSettings.load();
     }
 }
