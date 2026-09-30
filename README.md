@@ -50,7 +50,7 @@ PromptEnhance has three independent context controls:
 - **Send Active Model Context** sends the selected base model and each active LoRA as SwarmUI's model registry describes them (title, class, trigger phrase, usage hint, description, tags), with each LoRA's model weight, text-encoder weight, and section scope as SwarmUI will apply them.
 
 Current Prompt Images and past-generation outputs use separate namespaces, so **Image 1** never means a historical output. Nothing requested is dropped. Each of these fails the enhance with an `invalid_request` error that names the problem:
-- an attached Prompt Image that is empty or is not a still image
+- an attached Prompt Image that is empty or whose bytes are not an image (the type sent is read from the bytes, not the label)
 - a LoRA SwarmUI does not know
 - a model your role may not use
 - a malformed weight or section scope

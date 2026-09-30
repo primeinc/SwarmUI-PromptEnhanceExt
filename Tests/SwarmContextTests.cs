@@ -76,6 +76,9 @@ public class SwarmContextTests
     [Xunit.InlineData("""{"promptimages":["data:image/png;base64,AAAAAAAAAAA"]}""")]
     [Xunit.InlineData("""{"promptimages":["inputs/promptenhance-missing.png"]}""")]
     [Xunit.InlineData("""{"promptimages":["data:text/plain;base64,aGVsbG8="]}""")]
+    [Xunit.InlineData("""{"promptimages":["data:application/octet-stream;base64,aGVsbG8="]}""")]
+    [Xunit.InlineData("""{"promptimages":["data:foo/bar;base64,aGVsbG8="]}""")]
+    [Xunit.InlineData("""{"promptimages":["AAAAAAAAAAAA"]}""")]
     [Xunit.InlineData("""{"promptimages":[""]}""")]
     [Xunit.InlineData("""{"promptimages":[null]}""")]
     [Xunit.InlineData("""{"promptimages":[1]}""")]
@@ -89,6 +92,14 @@ public class SwarmContextTests
     public void ValuesSwarmOrThisParserRejectsOrWouldDrop_AreArgumentExceptions(string json)
     {
         Xunit.Assert.Throws<ArgumentException>(() => Resolve(SwarmHost.PermittedSession(), json, true, true));
+    }
+
+    [Xunit.Fact]
+    public void PromptImageMediaType_ComesFromTheBytes_NotTheLabel()
+    {
+        BackendSchema.PromptContext context = Resolve(SwarmHost.PermittedSession(), $$"""{"promptimages":["data:image/jpeg;base64,{{SwarmHost.PngBase64}}","{{SwarmHost.PngBase64B}}"]}""", true, false);
+
+        Xunit.Assert.Equal(["image/png", "image/png"], context.PromptImages.Select(image => image.MediaType));
     }
 
     [Xunit.Fact]

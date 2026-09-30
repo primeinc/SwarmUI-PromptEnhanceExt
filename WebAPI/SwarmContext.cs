@@ -2,7 +2,6 @@ using System.Globalization;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Core;
-using SwarmUI.Media;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using SwarmUI.WebAPI;
@@ -116,14 +115,10 @@ public static class SwarmContext
         {
             for (int i = 0; i < images.Count; i++)
             {
-                if (images[i].Type.MetaType != MediaMetaType.Image)
-                {
-                    throw new ArgumentException($"Prompt Image {i + 1} is {images[i].Type.MimeType}, not a still image.");
-                }
                 context.PromptImages.Add(new BackendSchema.MediaContent
                 {
                     Data = images[i].AsBase64,
-                    MediaType = images[i].Type.MimeType,
+                    MediaType = ImageMimeType(images[i].RawData, i),
                     Label = $"Image {i + 1}"
                 });
             }
@@ -131,6 +126,20 @@ public static class SwarmContext
         if (sendActiveModelContext)
         {
             context.ActiveModel = ActiveModel(input);
+        }
+    }
+
+    /// <summary>The MIME type of Prompt Image <paramref name="index"/>'s bytes, read from its encoded header by ImageSharp: SwarmUI labels a Prompt Image from its data-URL prefix, or as PNG without one, and never checks the bytes (ImageFile.cs:29-39). Throws <see cref="ArgumentException"/> when the bytes are not an image ImageSharp can identify.</summary>
+    private static string ImageMimeType(byte[] bytes, int index)
+    {
+        try
+        {
+            SixLabors.ImageSharp.ImageInfo info = SixLabors.ImageSharp.Image.Identify(bytes);
+            return info.Metadata.DecodedImageFormat?.DefaultMimeType ?? throw new ArgumentException($"Prompt Image {index + 1} has no identifiable image format.");
+        }
+        catch (Exception ex) when (ex is SixLabors.ImageSharp.ImageFormatException or NotSupportedException)
+        {
+            throw new ArgumentException($"Prompt Image {index + 1} is not image data: {ex.Message}", ex);
         }
     }
 
