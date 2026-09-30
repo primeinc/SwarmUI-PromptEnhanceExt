@@ -324,6 +324,9 @@ public class BackendClient
         }
     }
 
+    /// <summary>Parses the canonical Swarm context payload.</summary>
+    public static BackendSchema.PromptContext ParseContext(JObject context) => PromptContextParser.Parse(context);
+
     /// <summary>Parses the request's media array. A present-but-dataless entry throws ArgumentException.</summary>
     public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
     {
