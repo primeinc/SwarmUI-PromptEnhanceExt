@@ -265,7 +265,7 @@ test('A real click on Enhance with an empty prompt surfaces an error and sends n
 });
 
 test('Current PromptImages are sent in exact order with explicit Image 1..N labels', async () => {
-    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: true, sendActiveModelContext: false } });
     const area = doc.getElementById('alt_prompt_image_area')!;
     for (const raw of ['QUJD', 'REVG']) {
         const img = doc.createElement('img');
@@ -282,7 +282,7 @@ test('Current PromptImages are sent in exact order with explicit Image 1..N labe
 });
 
 test('A current PromptImage with no Swarm media source fails instead of being silently dropped', async () => {
-    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendPromptImages: true, sendActiveModelContext: false } });
     const img = doc.createElement('img');
     img.className = 'alt-prompt-image';
     doc.getElementById('alt_prompt_image_area')!.appendChild(img);
