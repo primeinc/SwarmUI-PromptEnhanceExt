@@ -20,7 +20,7 @@ interface PESettings {
     systemPrompt: string;
     temperature: number;
     maxTokens: number;
-    sendSelectedImage: boolean;
+    sendPromptImages: boolean;
     pastGenerations: number;
     sendActiveModelContext: boolean;
     replaceMode: PEReplaceMode;
@@ -34,7 +34,7 @@ interface PERawSettingsInput {
     systemPrompt?: string;
     temperature?: string;
     maxTokens?: string;
-    sendSelectedImage?: boolean;
+    sendPromptImages?: boolean;
     pastGenerations?: string;
     sendActiveModelContext?: boolean;
     replaceMode?: string;
