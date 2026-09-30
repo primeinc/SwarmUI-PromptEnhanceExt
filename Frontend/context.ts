@@ -243,9 +243,12 @@ class PromptEnhanceContext {
         let loras: PEActiveLoraContext[] = [];
         for (let i = 0; i < names.length; i++) {
             let metadata = await this.describeModel(names[i]!, 'LoRA');
-            let weight = Number.isFinite(weights[i]) ? weights[i]! : 1;
-            let textEncoderWeight = Number.isFinite(tencWeights[i]) ? tencWeights[i]! : weight;
-            let scopeId = Number.isFinite(confinements[i]) ? confinements[i]! : 0;
+            let rawWeight = weights[i];
+            let rawTencWeight = tencWeights[i];
+            let rawScopeId = confinements[i];
+            let weight = typeof rawWeight == 'number' && Number.isFinite(rawWeight) ? rawWeight : 1;
+            let textEncoderWeight = typeof rawTencWeight == 'number' && Number.isFinite(rawTencWeight) ? rawTencWeight : weight;
+            let scopeId = typeof rawScopeId == 'number' && Number.isFinite(rawScopeId) ? rawScopeId : 0;
             loras.push({
                 ...metadata,
                 weight,
