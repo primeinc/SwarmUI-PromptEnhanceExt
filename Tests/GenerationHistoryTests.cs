@@ -180,16 +180,25 @@ public class GenerationHistoryTests : IDisposable
     }
 
     [Xunit.Fact]
-    public async Task NothingIsRecorded_WhilePastGenerationsIsZeroAtRecordTime()
+    public void NothingIsPrepared_WhilePastGenerationsIsZero()
+    {
+        Session session = UserWithHistory(0);
+        T2IParamInput request = new(session);
+
+        Xunit.Assert.Null(WebAPI.GenerationHistory.Prepare(request, GenerateOutputs(request, ("unrecorded", SwarmHost.PngBase64)), T0));
+    }
+
+    [Xunit.Fact]
+    public async Task ARequestPreparedBeforeTheUserTurnedHistoryOff_IsNotRecordedAfterwards()
     {
         Session session = UserWithHistory(2);
         T2IParamInput request = new(session);
-        WebAPI.GenerationHistory.PendingRequest pending = WebAPI.GenerationHistory.Prepare(request, GenerateOutputs(request, ("unrecorded", SwarmHost.PngBase64)), T0);
-        SwarmHost.SaveSettings(session, """{"pastGenerations":0}""");
+        WebAPI.GenerationHistory.PendingRequest pending = WebAPI.GenerationHistory.Prepare(request, GenerateOutputs(request, ("in flight", SwarmHost.PngBase64)), T0);
 
+        JObject result = await WebAPI.SessionSettings.SavePromptEnhanceSettings(new JObject { ["settings"] = new JObject { ["pastGenerations"] = 0 } }, session);
         await WebAPI.GenerationHistory.Record(pending);
-        SwarmHost.SaveSettings(session, """{"pastGenerations":2}""");
 
+        Xunit.Assert.True(result["success"]!.Value<bool>());
         Xunit.Assert.Empty(WebAPI.GenerationHistory.Recent(session.User.UserID, 10));
     }
 

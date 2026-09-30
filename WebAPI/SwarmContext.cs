@@ -2,6 +2,7 @@ using System.Globalization;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Core;
+using SwarmUI.Media;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using SwarmUI.WebAPI;
@@ -51,8 +52,17 @@ public static class SwarmContext
         return $"Section {id}";
     }
 
+    /// <summary>The per-LoRA list parameters, which may not hold more entries than there are LoRAs: SwarmUI would drop the extras (T2IParamInput.cs:64-86).</summary>
+    private static readonly (T2IRegisteredParam<List<string>> Param, string Key)[] LoraLists =
+    [
+        (T2IParamTypes.LoraWeights, "loraweights"),
+        (T2IParamTypes.LoraTencWeights, "loratencweights"),
+        (T2IParamTypes.LoraSectionConfinement, "lorasectionconfinement")
+    ];
+
     /// <summary>Builds the Prompt Images and active-model parts of <paramref name="context"/> from <paramref name="swarmInput"/>.
-    /// Every key must belong to a channel the user enabled; anything else, and every value SwarmUI's parser rejects, throws <see cref="ArgumentException"/>.</summary>
+    /// Every key must belong to a channel the user enabled; anything else, anything SwarmUI's parser would silently drop, and every value SwarmUI's parser rejects, throws <see cref="ArgumentException"/>.
+    /// Parsing goes through <see cref="T2IAPI.RequestToParams"/>, which builds a <see cref="T2IParamInput"/> for the session: like any SwarmUI request, that takes the user's next request id.</summary>
     public static void Resolve(Session session, JObject swarmInput, bool sendPromptImages, bool sendActiveModelContext, BackendSchema.PromptContext context)
     {
         HashSet<string> allowed = [];
@@ -71,13 +81,34 @@ public static class SwarmContext
                 throw new ArgumentException($"swarmInput.{property.Name} is not accepted: it is not a key of an enabled context channel.");
             }
         }
+        // SwarmUI joins the array and splits it dropping empty entries (T2IAPI.cs:216, T2IParamTypes.cs:1145), so an empty entry must be rejected before parsing.
+        if (swarmInput.TryGetValue("promptimages", out JToken rawImages) && (rawImages is not JArray imageEntries || imageEntries.Any(entry => entry.Type != JTokenType.String || string.IsNullOrWhiteSpace(entry.Value<string>()))))
+        {
+            throw new ArgumentException("swarmInput.promptimages must be an array of non-empty image data strings.");
+        }
+        // SwarmUI's parser reports a malformed value as a plain Exception naming the parameter (T2IParamTypes.cs:1231-1234); every parse failure here is a malformed request.
         T2IParamInput input;
         try
         {
             input = T2IAPI.RequestToParams(session, swarmInput, applyPresets: false);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException(ex.Message, ex);
+        }
+        int loraCount = input.TryGet(T2IParamTypes.Loras, out List<string> loras) ? loras.Count : 0;
+        foreach ((T2IRegisteredParam<List<string>> param, string key) in LoraLists)
+        {
+            if (input.TryGet(param, out List<string> values) && values.Count > loraCount)
+            {
+                throw new ArgumentException($"swarmInput.{key} has {values.Count} entries for {loraCount} LoRAs.");
+            }
+        }
+        try
+        {
             input.ApplySpecialLogic();
         }
-        catch (SwarmReadableErrorException ex)
+        catch (Exception ex)
         {
             throw new ArgumentException(ex.Message, ex);
         }
@@ -85,6 +116,10 @@ public static class SwarmContext
         {
             for (int i = 0; i < images.Count; i++)
             {
+                if (images[i].Type.MetaType != MediaMetaType.Image)
+                {
+                    throw new ArgumentException($"Prompt Image {i + 1} is {images[i].Type.MimeType}, not a still image.");
+                }
                 context.PromptImages.Add(new BackendSchema.MediaContent
                 {
                     Data = images[i].AsBase64,

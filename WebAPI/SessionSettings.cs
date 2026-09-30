@@ -183,7 +183,11 @@ public class SessionSettings
             }
             if (merged["pastGenerations"].Value<int>() == 0)
             {
-                ForgetHistory(session);
+                JObject forgetError = ForgetHistory(session);
+                if (forgetError != null)
+                {
+                    return Task.FromResult(forgetError);
+                }
             }
             JObject response = PromptEnhanceAPI.CreateSettingsResponse(merged);
             if (recovered)
@@ -325,12 +329,23 @@ public class SessionSettings
         }
     }
 
-    /// <summary>Deletes the user's Past Generations history once recording is off. When the store did not open, this server run holds nothing it can reach; the failed open is already logged as an error.</summary>
-    private static void ForgetHistory(Session session)
+    /// <summary>Deletes the user's Past Generations history once recording is off, after the settings are saved. Returns null on success, else a classified error response saying the settings were saved but the history was not deleted.
+    /// When the store did not open, this server run holds nothing it can reach; the failed open is already logged as an error.</summary>
+    private static JObject ForgetHistory(Session session)
     {
-        if (GenerationHistory.IsOpen)
+        if (!GenerationHistory.IsOpen)
+        {
+            return null;
+        }
+        try
         {
             GenerationHistory.Forget(session.User.UserID);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"[PromptEnhance] Could not delete the Past Generations history of user {session.User.UserID}: {ex}");
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, $"The settings were saved, but the Past Generations history could not be deleted: {ex.Message}");
         }
     }
 
@@ -350,8 +365,7 @@ public class SessionSettings
             {
                 return Task.FromResult(persistError);
             }
-            ForgetHistory(session);
-            return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
+            return Task.FromResult(ForgetHistory(session) ?? PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)
         {

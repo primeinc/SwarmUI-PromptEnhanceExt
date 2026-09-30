@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -69,11 +70,14 @@ public static class GenerationHistory
     /// <summary>One output of a finished request: the task SwarmUI resolves to the saved file, and the resolved prompt.</summary>
     public record class PendingOutput(Task<MediaFile> SavedFile, string Prompt);
 
-    /// <summary>A finished request, read from SwarmUI's event on the request thread so the worker never touches SwarmUI's live parameter input.</summary>
-    public record class PendingRequest(Session Session, long SwarmRequestId, DateTime RecordedAt, List<PendingOutput> Outputs);
+    /// <summary>A finished request, read from SwarmUI's event on the request thread so the worker touches neither SwarmUI's live parameter input nor its session store (which SwarmUI disposes before extensions shut down). <paramref name="Epoch"/> is the user's <see cref="Epochs"/> value when it was prepared.</summary>
+    public record class PendingRequest(string UserId, long Epoch, long SwarmRequestId, DateTime RecordedAt, List<PendingOutput> Outputs);
 
     /// <summary>The per-output input SwarmUI handed <see cref="T2IEngine.PostGenerateEvent"/> for each final output, keyed by its <see cref="MediaFile"/> instance; entries disappear with the file.</summary>
     private static readonly ConditionalWeakTable<MediaFile, T2IParamInput> Captured = [];
+
+    /// <summary>Per-user count of <see cref="Forget"/> calls. A request prepared before the user's latest Forget is not recorded.</summary>
+    private static readonly ConcurrentDictionary<string, long> Epochs = [];
 
     /// <summary>Guards <see cref="Database"/> and <see cref="Requests"/>.</summary>
     private static readonly object DatabaseLock = new();
@@ -150,7 +154,10 @@ public static class GenerationHistory
         T2IEngine.PostBatchEvent += OnPostBatch;
     }
 
-    /// <summary>Unsubscribes from SwarmUI's generation events, then waits until the worker has recorded every queued request. Safe to call when not attached.</summary>
+    /// <summary>How long <see cref="Detach"/> waits for queued requests to be recorded.</summary>
+    public static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Unsubscribes from SwarmUI's generation events, then waits up to <see cref="DrainTimeout"/> for the worker to record every queued request. Safe to call when not attached.</summary>
     public static void Detach()
     {
         T2IEngine.PostGenerateEvent -= OnPostGenerate;
@@ -160,7 +167,10 @@ public static class GenerationHistory
             return;
         }
         Queue.Writer.Complete();
-        Worker.GetAwaiter().GetResult();
+        if (!Worker.Wait(DrainTimeout))
+        {
+            Logs.Error($"[PromptEnhance] The Past Generations history worker did not finish within {DrainTimeout.TotalSeconds} seconds; {Queue.Reader.Count} queued requests are not recorded.");
+        }
         Queue = null;
         Worker = null;
     }
@@ -210,11 +220,17 @@ public static class GenerationHistory
     }
 
     /// <summary>Reads what the worker needs from a finished request, on the thread SwarmUI raised the batch event on (every output is saved by then): the first <see cref="MaxOutputsPerRequest"/> still-image outputs with their resolved prompts.
-    /// Null when the request is not to be recorded because SwarmUI does not save files for the user or the request set Do Not Save. Throws when an output has no entry from <see cref="OnPostGenerate"/>: the two events failed to pair.</summary>
+    /// Null when the request is not to be recorded: SwarmUI does not save files for the user, the request set Do Not Save, or the user's Past Generations setting is 0. Throws when an output has no entry from <see cref="OnPostGenerate"/>: the two events failed to pair.</summary>
     public static PendingRequest Prepare(T2IParamInput input, T2IEngine.ImageOutput[] images, DateTime recordedAt)
     {
         Session session = input.SourceSession;
         if (session?.User == null || !session.User.Settings.SaveFiles || input.Get(T2IParamTypes.DoNotSave, false))
+        {
+            return null;
+        }
+        string userId = session.User.UserID;
+        long epoch = Epochs.GetValueOrDefault(userId);
+        if (SessionSettings.Effective(session, out _)["pastGenerations"].Value<int>() <= 0)
         {
             return null;
         }
@@ -228,7 +244,7 @@ public static class GenerationHistory
             Task<MediaFile> savedFile = image.ActualFileTask ?? throw new InvalidOperationException($"An output of request {input.UserRequestId} has no saved file.");
             outputs.Add(new PendingOutput(savedFile, perOutput.Get(T2IParamTypes.Prompt, "")));
         }
-        return outputs.Count == 0 ? null : new PendingRequest(session, input.UserRequestId, recordedAt, outputs);
+        return outputs.Count == 0 ? null : new PendingRequest(userId, epoch, input.UserRequestId, recordedAt, outputs);
     }
 
     /// <summary>JPEG bytes of <paramref name="image"/> with the longest edge at most <see cref="MaxStoredEdge"/>, encoded once with SwarmUI's JPEG helper.</summary>
@@ -247,26 +263,26 @@ public static class GenerationHistory
         return ImageFile.ISImgToJpgBytes(resized);
     }
 
-    /// <summary>Records one prepared request when the user's Past Generations setting is above 0, and prunes the user's history to <see cref="MaxRequestsPerUser"/>.
+    /// <summary>Records one prepared request, unless the user's history was forgotten since it was prepared, and prunes the user's history to <see cref="MaxRequestsPerUser"/>.
     /// Throws when SwarmUI failed to produce an output's saved file or the store is not open.</summary>
     public static async Task Record(PendingRequest pending)
     {
-        if (SessionSettings.Effective(pending.Session, out _)["pastGenerations"].Value<int>() <= 0)
-        {
-            return;
-        }
         List<(OutputEntry Entry, byte[] Jpeg)> outputs = [];
         foreach (PendingOutput output in pending.Outputs)
         {
             ImageFile saved = await output.SavedFile as ImageFile ?? throw new InvalidOperationException($"SwarmUI produced no saved image file for an output of request {pending.SwarmRequestId}.");
             outputs.Add((new OutputEntry { MediaType = MediaType.ImageJpg.MimeType, Prompt = output.Prompt, Metadata = saved.GetMetadata() }, StoredJpeg(saved)));
         }
-        string userId = pending.Session.User.UserID;
+        string userId = pending.UserId;
         lock (DatabaseLock)
         {
             if (Database == null)
             {
                 throw new InvalidOperationException("The PromptEnhance generation history is not open.");
+            }
+            if (Epochs.GetValueOrDefault(userId) != pending.Epoch)
+            {
+                return;
             }
             RequestEntry entry = new() { Id = ObjectId.NewObjectId(), UserId = userId, RecordedAt = pending.RecordedAt, SwarmRequestId = pending.SwarmRequestId };
             for (int i = 0; i < outputs.Count; i++)
@@ -295,7 +311,7 @@ public static class GenerationHistory
         Requests.Delete(entry.Id);
     }
 
-    /// <summary>Deletes every record of <paramref name="userId"/> with its image bytes. Throws when the store is not open.</summary>
+    /// <summary>Deletes every record of <paramref name="userId"/> with its image bytes, and every request of that user still being recorded. Throws when the store is not open.</summary>
     public static void Forget(string userId)
     {
         lock (DatabaseLock)
@@ -304,6 +320,7 @@ public static class GenerationHistory
             {
                 throw new InvalidOperationException("The PromptEnhance generation history is not open.");
             }
+            Epochs.AddOrUpdate(userId, 1, (_, epoch) => epoch + 1);
             foreach (RequestEntry entry in Requests.Find(r => r.UserId == userId).ToList())
             {
                 Delete(entry);

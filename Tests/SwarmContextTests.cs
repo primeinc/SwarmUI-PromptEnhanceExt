@@ -72,9 +72,33 @@ public class SwarmContextTests
     [Xunit.InlineData("""{"loras":["lora-a"],"loraweights":"1","loratencweights":"NaN"}""")]
     [Xunit.InlineData("""{"loras":["lora-a"],"loraweights":"1","lorasectionconfinement":"base"}""")]
     [Xunit.InlineData("""{"promptimages":["not base64 at all"]}""")]
-    public void ValuesSwarmOrThisParserRejects_AreArgumentExceptions(string json)
+    [Xunit.InlineData("""{"promptimages":["AAAAAAAAAAA"]}""")]
+    [Xunit.InlineData("""{"promptimages":["data:image/png;base64,AAAAAAAAAAA"]}""")]
+    [Xunit.InlineData("""{"promptimages":["inputs/promptenhance-missing.png"]}""")]
+    [Xunit.InlineData("""{"promptimages":["data:text/plain;base64,aGVsbG8="]}""")]
+    [Xunit.InlineData("""{"promptimages":[""]}""")]
+    [Xunit.InlineData("""{"promptimages":[null]}""")]
+    [Xunit.InlineData("""{"promptimages":[1]}""")]
+    [Xunit.InlineData("""{"promptimages":"data:image/png;base64,AAAA"}""")]
+    [Xunit.InlineData("""{"loras":["lora-a"],"loraweights":"1,garbage"}""")]
+    [Xunit.InlineData("""{"loras":["lora-a"],"loraweights":"1","loratencweights":"1,1"}""")]
+    [Xunit.InlineData("""{"loras":["lora-a"],"lorasectionconfinement":"0,0"}""")]
+    [Xunit.InlineData("""{"loraweights":"1"}""")]
+    [Xunit.InlineData("""{"loratencweights":"1"}""")]
+    [Xunit.InlineData("""{"lorasectionconfinement":"0"}""")]
+    public void ValuesSwarmOrThisParserRejectsOrWouldDrop_AreArgumentExceptions(string json)
     {
         Xunit.Assert.Throws<ArgumentException>(() => Resolve(SwarmHost.PermittedSession(), json, true, true));
+    }
+
+    [Xunit.Fact]
+    public void AnEmptyPromptImageBesideARealOne_IsRejectedNotDropped()
+    {
+        string json = $$"""{"promptimages":["data:image/png;base64,{{SwarmHost.PngBase64}}",""]}""";
+
+        ArgumentException ex = Xunit.Assert.Throws<ArgumentException>(() => Resolve(SwarmHost.PermittedSession(), json, true, false));
+
+        Xunit.Assert.Contains("swarmInput.promptimages", ex.Message);
     }
 
     [Xunit.Fact]
