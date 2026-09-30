@@ -162,18 +162,6 @@ public class BackendClient
         """)]
     public static async Task<JObject> PromptEnhanceListModels(Session session)
     {
-        List<BackendSchema.MediaContent> media;
-        BackendSchema.PromptContext context;
-        try
-        {
-            media = ParseMedia(raw?["media"] as JArray);
-            context = ParseContext(raw?["context"]);
-        }
-        catch (ArgumentException ex)
-        {
-            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
-        }
-
         JObject error = null;
         (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
@@ -249,6 +237,18 @@ public class BackendClient
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No prompt text was provided to enhance.");
         }
+        List<BackendSchema.MediaContent> media;
+        BackendSchema.PromptContext context;
+        try
+        {
+            media = ParseMedia(raw?["media"] as JArray);
+            context = ParseContext(raw?["context"]);
+        }
+        catch (ArgumentException ex)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
+        }
+
         JObject error = null;
         (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
