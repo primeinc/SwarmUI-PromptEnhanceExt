@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace PromptEnhance;
 
 /// <summary>Builds the OpenAI-compatible `/v1/chat/completions` request body.</summary>
@@ -25,19 +27,13 @@ public static class BackendSchema
         /// <summary>The prompt SwarmUI generated this output from, after wildcard and random-tag resolution.</summary>
         public string Prompt;
 
-        /// <summary>SwarmUI's raw generation metadata JSON for this output.</summary>
+        /// <summary>The raw SwarmUI metadata saved in the output file; null when SwarmUI saved none.</summary>
         public string Metadata;
     }
 
     /// <summary>One past SwarmUI generation request and its saved outputs.</summary>
     public class PastGeneration
     {
-        /// <summary>When the request finished, in UTC.</summary>
-        public DateTime RecordedAt;
-
-        /// <summary>SwarmUI's request id. Unique only within one server run: SwarmUI restarts the counter on every launch.</summary>
-        public long SwarmRequestId;
-
         /// <summary>The outputs, in the order SwarmUI produced them.</summary>
         public List<PastGenerationOutput> Outputs = [];
     }
@@ -189,7 +185,10 @@ public static class BackendSchema
                     {
                         parts.Add(TextPart($"{output.Image.Label}\nPrompt: {output.Prompt}"));
                         parts.Add(ImagePart(output.Image));
-                        parts.Add(TextPart($"Raw SwarmUI metadata for {output.Image.Label}:\n{output.Metadata}"));
+                        if (output.Metadata != null)
+                        {
+                            parts.Add(TextPart($"Raw SwarmUI metadata for {output.Image.Label}:\n{output.Metadata}"));
+                        }
                     }
                 }
             }
@@ -199,7 +198,7 @@ public static class BackendSchema
                 for (int i = 0; i < context.ActiveModel.Loras.Count; i++)
                 {
                     ActiveLora lora = context.ActiveModel.Loras[i];
-                    modelLines.Add($"Active LoRA {i + 1}:\n{ModelText(lora)}\nModel weight: {lora.Weight}\nText encoder weight: {lora.TextEncoderWeight}\nScope: {lora.Scope} ({lora.ScopeId})");
+                    modelLines.Add($"Active LoRA {i + 1}:\n{ModelText(lora)}\nModel weight: {lora.Weight.ToString(CultureInfo.InvariantCulture)}\nText encoder weight: {lora.TextEncoderWeight.ToString(CultureInfo.InvariantCulture)}\nScope: {lora.Scope} ({lora.ScopeId})");
                 }
                 modelLines.Add("Account for the active generation stack when rewriting. Preserve required trigger phrases when appropriate. Avoid needlessly restating concepts already strongly supplied by active adapters, and avoid introducing prompt language that conflicts with known active conditioning.");
                 parts.Add(TextPart(string.Join("\n\n", modelLines)));

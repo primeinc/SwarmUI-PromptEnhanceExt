@@ -83,7 +83,6 @@ public class BackendSchemaTests
             [
                 new()
                 {
-                    SwarmRequestId = 1001,
                     Outputs =
                     [
                         new() { Image = new() { Data = "QQ==", MediaType = "image/png", Label = "Past Generation 1 Output 1" }, Prompt = "a red cat", Metadata = "{\"seed\":1}" },
@@ -99,6 +98,42 @@ public class BackendSchemaTests
         Xunit.Assert.Equal(("image_url", "data:image/png;base64,QQ=="), parts[first + 1]);
         Xunit.Assert.Equal(("text", "Raw SwarmUI metadata for Past Generation 1 Output 1:\n{\"seed\":1}"), parts[first + 2]);
         Xunit.Assert.DoesNotContain(parts, part => part.Value == "CURRENT PROMPT IMAGES");
+    }
+
+    [Xunit.Fact]
+    public void PastGenerationOutput_WithoutSavedMetadata_SendsNoMetadataPart()
+    {
+        List<(string Type, string Value)> parts = Parts(new()
+        {
+            PastGenerations = [new() { Outputs = [new() { Image = new() { Data = "QQ==", MediaType = "image/jpeg", Label = "Past Generation 1 Output 1" }, Prompt = "a red cat", Metadata = null }] }]
+        });
+
+        int label = parts.IndexOf(("text", "Past Generation 1 Output 1\nPrompt: a red cat"));
+        Xunit.Assert.Equal(("image_url", "data:image/jpeg;base64,QQ=="), parts[label + 1]);
+        Xunit.Assert.Equal(("text", "CURRENT PROMPT TO ENHANCE:\nCURRENT"), parts[label + 2]);
+        Xunit.Assert.DoesNotContain(parts, part => part.Value.StartsWith("Raw SwarmUI metadata", StringComparison.Ordinal));
+    }
+
+    [Xunit.Fact]
+    public void ActiveModel_WeightsUseInvariantCulture_WhateverTheCurrentCulture()
+    {
+        System.Globalization.CultureInfo previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        try
+        {
+            List<(string Type, string Value)> parts = Parts(new()
+            {
+                ActiveModel = new() { Loras = [new() { Name = "adapter", Weight = 0.8, TextEncoderWeight = 0.55, Scope = "Global" }] }
+            });
+
+            string model = parts.Single(part => part.Value.StartsWith("ACTIVE MODEL CONTEXT", StringComparison.Ordinal)).Value;
+            Xunit.Assert.Contains("Model weight: 0.8\n", model);
+            Xunit.Assert.Contains("Text encoder weight: 0.55\n", model);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Xunit.Fact]

@@ -4,13 +4,14 @@ using SwarmUI.Text2Image;
 
 namespace PromptEnhance.Tests;
 
-/// <summary>The parts of SwarmUI startup that the context and history code reads: the registered T2I parameter types (Program.cs:314) and the Stable-Diffusion and LoRA model registries, holding the test models below.</summary>
+/// <summary>The parts of SwarmUI startup that the context and history code reads: the registered T2I parameter types (Program.cs:314) and the Stable-Diffusion and LoRA model registries, holding the test models below.
+/// These are process-global SwarmUI statics that are set once and never restored; tests that use them rely on Tests/AssemblyInfo.cs disabling test parallelization.</summary>
 internal static class SwarmHost
 {
-    /// <summary>A 1x1 PNG of one gray level, base64.</summary>
-    public static string Png(byte gray)
+    /// <summary>A PNG of one gray level, base64.</summary>
+    public static string Png(byte gray, int width = 1, int height = 1)
     {
-        using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> image = new(1, 1, new SixLabors.ImageSharp.PixelFormats.Rgba32(gray, gray, gray, 255));
+        using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> image = new(width, height, new SixLabors.ImageSharp.PixelFormats.Rgba32(gray, gray, gray, 255));
         using MemoryStream stream = new();
         SixLabors.ImageSharp.ImageExtensions.SaveAsPng(image, stream);
         return Convert.ToBase64String(stream.ToArray());

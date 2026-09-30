@@ -141,7 +141,7 @@ public class SessionSettings
     }
 
     /// <summary>API route: validates then persists a partial settings object. Merge order is defaults ← previously stored ← incoming, per known key; unknown keys are dropped.</summary>
-    [API.APIDescription("Validates and saves a partial PromptEnhance settings object for the current user. Keys left out keep their stored value; unknown keys are ignored. Nothing is saved if any key is invalid.",
+    [API.APIDescription("Validates and saves a partial PromptEnhance settings object for the current user. Keys left out keep their stored value; unknown keys are ignored. Nothing is saved if any key is invalid. Saving pastGenerations as 0 deletes the user's Past Generations history.",
         """
             "success": true,
             "settings": { ... } // the full saved settings, as GetPromptEnhanceSettings returns them
@@ -163,6 +163,11 @@ public class SessionSettings
             {
                 return Task.FromResult(validationError);
             }
+            JToken incomingHistory = incoming["pastGenerations"];
+            if (incomingHistory != null && incomingHistory.Type == JTokenType.Integer && incomingHistory.Value<int>() > 0 && !GenerationHistory.IsOpen)
+            {
+                return Task.FromResult(PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Past Generations is unavailable: the generation history store did not open on this server (see the server log)."));
+            }
             JObject merged = Effective(session, out bool recovered);
             foreach (string key in KnownKeys)
             {
@@ -175,6 +180,10 @@ public class SessionSettings
             if (persistError != null)
             {
                 return Task.FromResult(persistError);
+            }
+            if (merged["pastGenerations"].Value<int>() == 0)
+            {
+                ForgetHistory(session);
             }
             JObject response = PromptEnhanceAPI.CreateSettingsResponse(merged);
             if (recovered)
@@ -316,8 +325,17 @@ public class SessionSettings
         }
     }
 
-    /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/> and returns them.</summary>
-    [API.APIDescription("Resets the current user's PromptEnhance settings to the defaults. The backend API key is separate and is not touched.",
+    /// <summary>Deletes the user's Past Generations history once recording is off. When the store did not open, this server run holds nothing it can reach; the failed open is already logged as an error.</summary>
+    private static void ForgetHistory(Session session)
+    {
+        if (GenerationHistory.IsOpen)
+        {
+            GenerationHistory.Forget(session.User.UserID);
+        }
+    }
+
+    /// <summary>API route: overwrites the user's stored settings with <see cref="Defaults"/>, deletes the user's Past Generations history, and returns the defaults.</summary>
+    [API.APIDescription("Resets the current user's PromptEnhance settings to the defaults and deletes the user's Past Generations history. The backend API key is separate and is not touched.",
         """
             "success": true,
             "settings": { ... } // the defaults, as GetPromptEnhanceSettings returns them
@@ -332,6 +350,7 @@ public class SessionSettings
             {
                 return Task.FromResult(persistError);
             }
+            ForgetHistory(session);
             return Task.FromResult(PromptEnhanceAPI.CreateSettingsResponse(settings));
         }
         catch (Exception ex)

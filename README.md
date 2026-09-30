@@ -46,7 +46,7 @@ The screenshots come from the extension's browser tests, which run it against a 
 PromptEnhance has three independent context controls:
 
 - **Send Prompt Images** sends the Generate tab's Prompt Images in order, the same `promptimages` SwarmUI itself would send. The enhancer sees them as **Image 1**, **Image 2**, and so on.
-- **Past Generations to Include** sends your last N finished generation requests, oldest to newest. Each output image carries the prompt SwarmUI generated it from (after wildcards and `<random:…>` are resolved) and its raw SwarmUI metadata. `0` disables it. See [Generation history](#generation-history).
+- **Past Generations to Include** sends your last N finished generation requests, oldest to newest. Each output image carries the prompt SwarmUI generated it from (after wildcards and `<random:…>` are resolved) and the raw metadata SwarmUI saved in the output file. `0` disables it and deletes your history. See [Generation history](#generation-history).
 - **Send Active Model Context** sends the selected base model and each active LoRA as SwarmUI's model registry describes them (title, class, trigger phrase, usage hint, description, tags), with each LoRA's model weight, text-encoder weight, and section scope as SwarmUI will apply them.
 
 Current Prompt Images and past-generation outputs use separate namespaces, so **Image 1** never means a historical output. Nothing requested is dropped: an attached Prompt Image without data, a LoRA SwarmUI does not know, a model your role may not use, or a malformed weight fails the enhance with an `invalid_request` error naming it.
@@ -54,10 +54,12 @@ Current Prompt Images and past-generation outputs use separate namespaces, so **
 ### Generation history
 
 Past Generations come from a per-user history the server keeps in `Data/PromptEnhance/history.ldb` (under SwarmUI's data directory). It survives page reloads and server restarts.
-- A request is recorded only while your **Past Generations to Include** is above `0`, SwarmUI saves files for you, and the request is not **Do Not Save**.
-- Only still-image outputs that SwarmUI saved are recorded, each with its final image bytes, resolved prompt, and metadata.
+- A request is recorded only when SwarmUI saves files for you, the request is not **Do Not Save**, and your **Past Generations to Include** is above `0` when the request finishes.
+- Only still-image outputs that SwarmUI saved are recorded: the first 4 of each request, each as a JPEG copy at most 1024 pixels on its longest edge, with its resolved prompt and the metadata SwarmUI saved in the file. With SwarmUI's **Save Metadata** off, no metadata is recorded or sent.
+- Recording happens on a background worker after SwarmUI finishes the request, so it never delays generation.
 - The newest 10 requests per user are kept; older ones are deleted as new ones arrive.
-- Deleting an image from SwarmUI's output history does not remove its copy here; it ages out with the next 10 requests.
+- Saving **Past Generations to Include** as `0`, or resetting the settings, deletes your history. Deleting an image from SwarmUI's output history does not remove its copy here.
+- If the history file cannot be opened at startup, the server log shows the error and saving **Past Generations to Include** above `0` is refused.
 
 Settings are saved per user, on the server. Each field in the settings modal has a **?** popover describing it.
 
