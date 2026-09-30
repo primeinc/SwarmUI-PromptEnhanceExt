@@ -21,6 +21,8 @@ interface PESettings {
     temperature: number;
     maxTokens: number;
     sendSelectedImage: boolean;
+    pastGenerations: number;
+    sendActiveModelContext: boolean;
     replaceMode: PEReplaceMode;
 }
 
@@ -33,6 +35,8 @@ interface PERawSettingsInput {
     temperature?: string;
     maxTokens?: string;
     sendSelectedImage?: boolean;
+    pastGenerations?: string;
+    sendActiveModelContext?: boolean;
     replaceMode?: string;
 }
 
@@ -53,12 +57,68 @@ interface PEMediaEntry {
     type: 'base64';
     data: string;
     mediaType: string;
+    label?: string;
+}
+
+interface PEModelMetadataContext {
+    name: string;
+    title?: string;
+    architecture?: string;
+    class?: string;
+    compatClass?: string;
+    description?: string;
+    usageHint?: string;
+    triggerPhrase?: string;
+    tags: string[];
+}
+
+interface PEActiveLoraContext extends PEModelMetadataContext {
+    weight: number;
+    textEncoderWeight: number;
+    scopeId: number;
+    scope: string;
+}
+
+interface PEActiveModelContext {
+    baseModel: PEModelMetadataContext | null;
+    loras: PEActiveLoraContext[];
+}
+
+interface PEPastGenerationOutput {
+    image: PEMediaEntry;
+    metadata: string;
+}
+
+interface PEPastGenerationContext {
+    requestId: string;
+    prompt: string;
+    outputs: PEPastGenerationOutput[];
+}
+
+interface PEGenerationOutputSource {
+    src: string;
+    metadata: string;
+    batchId: string;
+    batchIndex: number;
+}
+
+interface PEGenerationAttempt {
+    requestId: string;
+    prompt: string;
+    outputs: PEGenerationOutputSource[];
+}
+
+interface PEPromptContext {
+    promptImages: PEMediaEntry[];
+    pastGenerations: PEPastGenerationContext[];
+    activeModel?: PEActiveModelContext;
 }
 
 /** Request payload for the PromptEnhanceRun API route. */
 interface PEEnhancePayload {
     prompt: string;
     media?: PEMediaEntry[];
+    context?: PEPromptContext;
 }
 
 /** A preview-mode enhancement awaiting explicit Apply/Cancel. */
@@ -86,6 +146,7 @@ interface PELimits {
     readonly timeoutSeconds: { readonly min: number; readonly max: number };
     readonly temperature: { readonly min: number; readonly max: number };
     readonly maxTokens: { readonly min: number; readonly max: number };
+    readonly pastGenerations: { readonly min: number; readonly max: number };
 }
 
 /** SwarmUI Generate-tab layout singleton (js/genpage/gentab/layout.js). */
