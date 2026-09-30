@@ -302,8 +302,8 @@ test('No current PromptImages produces an explicit empty current-image context',
 test('Past generations are grouped by exact request_id and keep every output plus raw metadata', async () => {
     const { doc, calls, pe } = await boot({ prompt: 'new prompt', settings: { pastGenerations: 1, sendActiveModelContext: false } });
     const batch = doc.getElementById('current_image_batch')!;
-    const meta0 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 1 } });
-    const meta1 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 2 } });
+    const meta0 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 1 }, sui_extra_data: { original_prompt: 'unexpanded {choice}' } });
+    const meta1 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 2 }, sui_extra_data: { original_prompt: 'unexpanded {choice}' } });
     for (const [index, raw, metadata] of [[0, 'QUJD', meta0], [1, 'REVG', meta1]] as const) {
         const block = doc.createElement('div');
         block.className = 'image-block';
