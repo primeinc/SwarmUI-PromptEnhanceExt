@@ -428,7 +428,8 @@ test('Contract: defaults, routes, API key type, replace modes, and bounds match 
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pe.PE_LIMITS)), {
         timeoutSeconds: { min: CONTRACT.settings.timeoutSeconds!.min, max: CONTRACT.settings.timeoutSeconds!.max },
         temperature: { min: CONTRACT.settings.temperature!.min, max: CONTRACT.settings.temperature!.max },
-        maxTokens: { min: CONTRACT.settings.maxTokens!.min, max: CONTRACT.settings.maxTokens!.max }
+        maxTokens: { min: CONTRACT.settings.maxTokens!.min, max: CONTRACT.settings.maxTokens!.max },
+        pastGenerations: { min: CONTRACT.settings.pastGenerations!.min, max: CONTRACT.settings.pastGenerations!.max }
     }, 'bounds equal the contract');
 });
 
