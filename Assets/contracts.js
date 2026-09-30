@@ -22,7 +22,8 @@ let PE_API_KEY_TYPE = 'promptenhance_api';
 let PE_LIMITS = {
     timeoutSeconds: { min: 1, max: 3600 },
     temperature: { min: 0, max: 2 },
-    maxTokens: { min: 1, max: 2147483647 }
+    maxTokens: { min: 1, max: 2147483647 },
+    pastGenerations: { min: 0, max: 10 }
 };
 /** Settings defaults, mirrored from contracts/pe-contract.json. */
 let PE_DEFAULT_SETTINGS = {
@@ -32,7 +33,9 @@ let PE_DEFAULT_SETTINGS = {
     systemPrompt: "You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.",
     temperature: 0.7,
     maxTokens: 1024,
-    sendSelectedImage: false,
+    sendPromptImages: false,
+    pastGenerations: 0,
+    sendActiveModelContext: false,
     replaceMode: 'preview'
 };
 /** True for any non-null object. */
@@ -79,7 +82,9 @@ function peNormalizeSettings(raw, current) {
         systemPrompt: raw.systemPrompt ?? current.systemPrompt,
         temperature: clamp(num(raw.temperature, current.temperature), PE_LIMITS.temperature.min, PE_LIMITS.temperature.max),
         maxTokens: clamp(Math.round(num(raw.maxTokens, current.maxTokens)), PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max),
-        sendSelectedImage: raw.sendSelectedImage ?? current.sendSelectedImage,
+        sendPromptImages: raw.sendPromptImages ?? current.sendPromptImages,
+        pastGenerations: clamp(Math.round(num(raw.pastGenerations, current.pastGenerations)), PE_LIMITS.pastGenerations.min, PE_LIMITS.pastGenerations.max),
+        sendActiveModelContext: raw.sendActiveModelContext ?? current.sendActiveModelContext,
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
     };
 }
@@ -113,8 +118,14 @@ function peAdaptSettingsResult(data) {
     if (typeof raw.maxTokens == 'number' && Number.isFinite(raw.maxTokens)) {
         settings.maxTokens = raw.maxTokens;
     }
-    if (typeof raw.sendSelectedImage == 'boolean') {
-        settings.sendSelectedImage = raw.sendSelectedImage;
+    if (typeof raw.sendPromptImages == 'boolean') {
+        settings.sendPromptImages = raw.sendPromptImages;
+    }
+    if (typeof raw.pastGenerations == 'number' && Number.isFinite(raw.pastGenerations)) {
+        settings.pastGenerations = raw.pastGenerations;
+    }
+    if (typeof raw.sendActiveModelContext == 'boolean') {
+        settings.sendActiveModelContext = raw.sendActiveModelContext;
     }
     let mode = peReplaceModeOf(raw.replaceMode);
     if (mode) {

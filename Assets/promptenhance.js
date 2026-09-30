@@ -52,28 +52,6 @@ class PromptEnhanceGenTab {
     relayout() {
         genTabLayout.altPromptSizeHandle();
     }
-    /** Reads the currently selected Generate-tab image into a base64 part through SwarmUI's imageToData. Returns null when no image is selected; throws when an image exists but does not read as an image. */
-    getSelectedImage() {
-        let img = document.querySelector('#current_image img.current-image-img')
-            || document.querySelector('#current_image img');
-        let src = img?.getAttribute('src');
-        if (!src) {
-            return Promise.resolve(null);
-        }
-        return new Promise((resolve, reject) => {
-            imageToData(src, (dataUrl) => {
-                let text = dataUrl ?? '';
-                let comma = text.indexOf(',');
-                let header = comma > 0 ? text.substring(0, comma) : '';
-                let data = comma > 0 ? text.substring(comma + 1) : '';
-                if (!header.startsWith('data:image/') || !header.endsWith(';base64') || !data) {
-                    reject(new Error('Could not attach the selected image: it did not load as an image.'));
-                    return;
-                }
-                resolve({ data: data, mediaType: header.substring('data:'.length, header.length - ';base64'.length) });
-            });
-        });
-    }
     /** One PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport failures resolve, never reject. */
     enhanceRequest(payload) {
         return new Promise((resolve) => {
@@ -154,12 +132,16 @@ class PromptEnhanceGenTab {
         this.setLoading(true);
         this.hidePreview();
         try {
-            let payload = { prompt: original.trim() };
-            if (promptEnhanceSettings.effective().sendSelectedImage) {
-                let image = await this.getSelectedImage();
-                if (image) {
-                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType }];
+            let settings = promptEnhanceSettings.effective();
+            let payload = {
+                prompt: original.trim(),
+                context: {
+                    promptImages: settings.sendPromptImages ? await promptEnhanceContext.collectPromptImages() : [],
+                    pastGenerations: await promptEnhanceContext.collectPastGenerations(settings.pastGenerations)
                 }
+            };
+            if (settings.sendActiveModelContext) {
+                payload.context.activeModel = await promptEnhanceContext.collectActiveModelContext();
             }
             let result = await this.enhanceRequest(payload);
             if (result.ok) {
@@ -211,6 +193,7 @@ class PromptEnhanceGenTab {
     /** Session-ready startup: mount the controls and load settings. */
     async start() {
         this.mount();
+        promptEnhanceContext.start();
         await promptEnhanceSettings.load();
     }
 }
