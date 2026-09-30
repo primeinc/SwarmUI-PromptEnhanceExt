@@ -63,29 +63,6 @@ class PromptEnhanceGenTab {
         genTabLayout.altPromptSizeHandle();
     }
 
-    /** Reads the currently selected Generate-tab image into a base64 part through SwarmUI's imageToData. Returns null when no image is selected; throws when an image exists but does not read as an image. */
-    getSelectedImage(): Promise<PEImagePart | null> {
-        let img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
-            || document.querySelector<HTMLImageElement>('#current_image img');
-        let src = img?.getAttribute('src');
-        if (!src) {
-            return Promise.resolve(null);
-        }
-        return new Promise((resolve, reject) => {
-            imageToData(src, (dataUrl) => {
-                let text = dataUrl ?? '';
-                let comma = text.indexOf(',');
-                let header = comma > 0 ? text.substring(0, comma) : '';
-                let data = comma > 0 ? text.substring(comma + 1) : '';
-                if (!header.startsWith('data:image/') || !header.endsWith(';base64') || !data) {
-                    reject(new Error('Could not attach the selected image: it did not load as an image.'));
-                    return;
-                }
-                resolve({ data: data, mediaType: header.substring('data:'.length, header.length - ';base64'.length) });
-            });
-        });
-    }
-
     /** One PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport failures resolve, never reject. */
     enhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
         return new Promise((resolve) => {
