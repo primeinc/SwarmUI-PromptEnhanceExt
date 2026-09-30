@@ -71,7 +71,7 @@ public static class BackendSchema
         public List<PastGeneration> PastGenerations = [];
         public ActiveModelContext ActiveModel;
 
-        public bool HasImages => PromptImages.Count > 0 || PastGenerations.Any(g => g.Outputs.Count > 0);
+        public bool HasImages => PromptImages.Count > 0 || PastGenerations.Exists(g => g.Outputs.Count > 0);
     }
 
     private static object ImagePart(MediaContent media)
@@ -116,7 +116,6 @@ public static class BackendSchema
         }
 
         context ??= new PromptContext();
-        bool hasImages = media is { Count: > 0 } || context.HasImages;
         bool hasStructuredContext = context.PromptImages.Count > 0 || context.PastGenerations.Count > 0 || context.ActiveModel != null;
 
         if (!hasStructuredContext)
