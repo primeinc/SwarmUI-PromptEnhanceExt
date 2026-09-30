@@ -119,9 +119,22 @@ public static class BackendSchema
         bool hasImages = media is { Count: > 0 } || context.HasImages;
         bool hasStructuredContext = context.PromptImages.Count > 0 || context.PastGenerations.Count > 0 || context.ActiveModel != null;
 
-        if (!hasImages && !hasStructuredContext)
+        if (!hasStructuredContext)
         {
-            messages.Add(new { role = "user", content = userText });
+            if (media is { Count: > 0 })
+            {
+                List<object> legacyParts = [];
+                foreach (MediaContent image in media)
+                {
+                    legacyParts.Add(ImagePart(image));
+                }
+                legacyParts.Add(new { type = "text", text = userText });
+                messages.Add(new { role = "user", content = legacyParts });
+            }
+            else
+            {
+                messages.Add(new { role = "user", content = userText });
+            }
         }
         else
         {
