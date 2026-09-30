@@ -46,12 +46,6 @@ interface PEModelOption {
     name: string;
 }
 
-/** Base64 image part collected from the Generate-tab selected image. */
-interface PEImagePart {
-    data: string;
-    mediaType: string;
-}
-
 /** Wire shape of one media entry in a PromptEnhanceRun request. */
 interface PEMediaEntry {
     type: 'base64';
