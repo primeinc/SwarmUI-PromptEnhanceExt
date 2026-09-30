@@ -146,9 +146,8 @@ globalThis.peAdaptSettingsResult = (data: unknown): PESettingsResult => {
     if (typeof sendPromptImages === 'boolean') {
         settings.sendPromptImages = sendPromptImages;
     }
-    const past = peFiniteNumber(pastGenerations);
-    if (past !== undefined) {
-        settings.pastGenerations = past;
+    if (Number.isInteger(pastGenerations) && typeof pastGenerations === 'number' && pastGenerations >= PE_LIMITS.pastGenerations.min && pastGenerations <= PE_LIMITS.pastGenerations.max) {
+        settings.pastGenerations = pastGenerations;
     }
     if (typeof sendActiveModelContext === 'boolean') {
         settings.sendActiveModelContext = sendActiveModelContext;

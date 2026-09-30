@@ -490,6 +490,21 @@ test('Contract: the settings adapter accepts every contract replace mode', async
     }
 });
 
+test('Contract: the settings adapter accepts pastGenerations only as an in-bounds integer', async () => {
+    const { pe } = await boot({});
+    const { min, max } = pe.PE_LIMITS.pastGenerations;
+    for (const value of [min, max]) {
+        const result = pe.peAdaptSettingsResult({ success: true, settings: { pastGenerations: value } });
+        assert.ok(result.ok, `adapter accepts ${value}`);
+        assert.strictEqual(result.settings.pastGenerations, value, `adapter passes ${value} through`);
+    }
+    for (const value of [min - 1, max + 1, 2.5, '3', Number.NaN]) {
+        const result = pe.peAdaptSettingsResult({ success: true, settings: { pastGenerations: value } });
+        assert.ok(result.ok, `adapter still accepts the envelope around ${String(value)}`);
+        assert.strictEqual(result.settings.pastGenerations, undefined, `adapter drops the out-of-contract ${String(value)}`);
+    }
+});
+
 test('A recovered settings store is surfaced via console.warn', async () => {
     const { calls } = await boot({ routeResponses: { GetPromptEnhanceSettings: { success: true, settings: {}, recovered: true } } });
     assert.ok(calls.consoleWarns.some((line) => line.includes('corrupt')), 'the recovered flag produces a warning');

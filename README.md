@@ -184,7 +184,7 @@ Two layouts build and test identically; the C# project picks one automatically (
 | --- | --- |
 | `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, API routes, and the generation history. |
 | `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, the API key registration (`UpstreamApiKey.cs`), the SwarmUI input resolver (`SwarmContext.cs`), and the generation history (`GenerationHistory.cs`). Every route carries `[API.APIDescription]`/`[API.APIParameter]` for SwarmUI's API doc generator, and failures return SwarmUI's `{ "error", "error_id" }` envelope with `error_id` from `errorCategories` in the contract. |
-| `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`, `params.js`). Globals one file assigns for another are declared in `Frontend/globals.d.ts`; every global is `pe`-prefixed, `PE_`-prefixed, or a `promptEnhance*` singleton. |
+| `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`, `params.js`). Globals one file assigns for another are declared in `Frontend/globals.d.ts`; every global is `pe`-prefixed, `PE_`-prefixed, a `PromptEnhance*` class, or a `promptEnhance*` singleton. |
 | `Assets/*.js` | The exact `tsc` output of `Frontend/`, committed because SwarmUI serves it. Never edit by hand; `npm run build:frontend` regenerates it. |
 | `Assets/promptenhance.css` | Extension styles, using only color tokens every SwarmUI theme defines. |
 | `contracts/pe-contract.json` | Routes, setting defaults, bounds, and apply modes, shared by the C# and TypeScript sides; parity tests pin both to it. |
