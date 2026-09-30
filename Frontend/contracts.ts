@@ -25,7 +25,8 @@ let PE_API_KEY_TYPE = 'promptenhance_api';
 let PE_LIMITS: PELimits = {
     timeoutSeconds: { min: 1, max: 3600 },
     temperature: { min: 0, max: 2 },
-    maxTokens: { min: 1, max: 2147483647 }
+    maxTokens: { min: 1, max: 2147483647 },
+    pastGenerations: { min: 0, max: 10 }
 };
 
 /** Settings defaults, mirrored from contracts/pe-contract.json. */
@@ -37,6 +38,8 @@ let PE_DEFAULT_SETTINGS: PESettings = {
     temperature: 0.7,
     maxTokens: 1024,
     sendSelectedImage: false,
+    pastGenerations: 0,
+    sendActiveModelContext: false,
     replaceMode: 'preview'
 };
 
@@ -88,6 +91,8 @@ function peNormalizeSettings(raw: PERawSettingsInput, current: PESettings): PESe
         temperature: clamp(num(raw.temperature, current.temperature), PE_LIMITS.temperature.min, PE_LIMITS.temperature.max),
         maxTokens: clamp(Math.round(num(raw.maxTokens, current.maxTokens)), PE_LIMITS.maxTokens.min, PE_LIMITS.maxTokens.max),
         sendSelectedImage: raw.sendSelectedImage ?? current.sendSelectedImage,
+        pastGenerations: clamp(Math.round(num(raw.pastGenerations, current.pastGenerations)), PE_LIMITS.pastGenerations.min, PE_LIMITS.pastGenerations.max),
+        sendActiveModelContext: raw.sendActiveModelContext ?? current.sendActiveModelContext,
         replaceMode: peReplaceModeOf(raw.replaceMode) ?? current.replaceMode
     };
 }
@@ -125,6 +130,12 @@ function peAdaptSettingsResult(data: unknown): PESettingsResult {
     }
     if (typeof raw.sendSelectedImage == 'boolean') {
         settings.sendSelectedImage = raw.sendSelectedImage;
+    }
+    if (typeof raw.pastGenerations == 'number' && Number.isFinite(raw.pastGenerations)) {
+        settings.pastGenerations = raw.pastGenerations;
+    }
+    if (typeof raw.sendActiveModelContext == 'boolean') {
+        settings.sendActiveModelContext = raw.sendActiveModelContext;
     }
     let mode = peReplaceModeOf(raw.replaceMode);
     if (mode) {
