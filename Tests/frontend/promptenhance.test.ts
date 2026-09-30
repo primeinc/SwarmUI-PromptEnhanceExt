@@ -16,6 +16,7 @@ const REPO = path.join(__dirname, '..', '..', '..');
 const ASSETS = path.join(REPO, 'Assets');
 const CONTRACTS_SRC = fs.readFileSync(path.join(ASSETS, 'contracts.js'), 'utf8');
 const SETTINGS_SRC = fs.readFileSync(path.join(ASSETS, 'settings.js'), 'utf8');
+const CONTEXT_SRC = fs.readFileSync(path.join(ASSETS, 'context.js'), 'utf8');
 const PROMPT_SRC = fs.readFileSync(path.join(ASSETS, 'promptenhance.js'), 'utf8');
 
 /** SwarmUI's util.js: vendored standalone workspace first, then the host layout `<SwarmUI>/src/Extensions/PromptEnhance`. */
@@ -45,6 +46,12 @@ const CONTRACT: PEContractFile = JSON.parse(fs.readFileSync(path.join(REPO, 'con
 /** SwarmUI's prompt region markup (src/Pages/_Generate/GenerateTab.cshtml). */
 const PAGE_HTML = `<!DOCTYPE html><html><body>
   <div class="current_image drag_image_target" id="current_image"></div>
+  <div id="current_image_batch"></div>
+  <select id="input_model"><option value=""></option></select>
+  <select id="input_loras" multiple></select>
+  <input id="input_loraweights" value="">
+  <input id="input_loratencweights" value="">
+  <input id="input_lorasectionconfinement" value="">
   <div class="alt_prompt_region drag_image_target drag_audio_target" id="alt_prompt_region">
     <div id="alt_prompt_extra_area" class="alt_prompt_extra_area">
       <button id="alt_prompt_image_clear_button" style="display: none;">Clear Attachments</button>
@@ -64,7 +71,7 @@ const HOST_STUBS = ['genericRequest', 'showError', 'triggerChangeFor', 'genTabLa
 
 interface RecordedCall {
     route: string;
-    payload: PEEnhancePayload & { settings?: Partial<PESettings> };
+    payload: PEEnhancePayload & { settings?: Partial<PESettings>; modelName?: string; subtype?: string };
 }
 
 interface BootCalls {
@@ -104,10 +111,20 @@ interface PESettingsSurface {
     apply(settings: Partial<PESettings>): void;
 }
 
+/** The context collector surface these tests drive. */
+interface PEContextSurface {
+    history: PEGenerationAttempt[];
+    scanHistoryDom(): void;
+    collectPromptImages(): Promise<PEMediaEntry[]>;
+    collectPastGenerations(count: number): Promise<PEPastGenerationContext[]>;
+    collectActiveModelContext(): Promise<PEActiveModelContext>;
+}
+
 /** The extension's global surface as the page sees it; `let` and `class` globals are read through the page realm. */
 interface PEGlobals {
     genTab: PEGenTabSurface;
     settings: PESettingsSurface;
+    context: PEContextSurface;
     PE_ROUTES: PERoutes;
     PE_API_KEY_TYPE: string;
     PE_LIMITS: PELimits;
@@ -148,7 +165,9 @@ async function boot(opts: BootOpts): Promise<BootResult> {
             ? opts.routeResponses[route]
             : route === 'GetPromptEnhanceSettings'
                 ? { success: true, settings: {} }
-                : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
+                : route === 'DescribeModel'
+                    ? { model: { name: (payload as RecordedCall['payload']).modelName ?? '', title: 'Title', description: 'Description', usage_hint: 'Usage', trigger_phrase: `trigger:${(payload as RecordedCall['payload']).modelName ?? ''}`, tags: ['tag-a'] } }
+                    : (opts.backendResponse ?? { success: true, response: 'ENHANCED PROMPT' });
         const hostError = (resp as { error?: unknown }).error;
         if (hostError) {
             // site.js genericRequest hands any response carrying `error` to the error handler, as the bare string.
@@ -183,7 +202,7 @@ async function boot(opts: BootOpts): Promise<BootResult> {
         doc.getElementById('current_image')!.appendChild(img);
     }
 
-    for (const src of [UTIL_SRC, CONTRACTS_SRC, SETTINGS_SRC, PROMPT_SRC]) {
+    for (const src of [UTIL_SRC, CONTRACTS_SRC, SETTINGS_SRC, CONTEXT_SRC, PROMPT_SRC]) {
         const script = doc.createElement('script');
         script.textContent = src;
         doc.body.appendChild(script);
@@ -191,6 +210,7 @@ async function boot(opts: BootOpts): Promise<BootResult> {
     const pe = win.eval(`({
         genTab: promptEnhanceGenTab,
         settings: promptEnhanceSettings,
+        context: promptEnhanceContext,
         PE_ROUTES, PE_API_KEY_TYPE, PE_LIMITS, PE_REPLACE_MODES, PE_DEFAULT_SETTINGS,
         peAdaptSettingsResult, peNormalizeSettings
     })`) as PEGlobals;
@@ -244,40 +264,88 @@ test('A real click on Enhance with an empty prompt surfaces an error and sends n
     assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no enhance request for an empty prompt');
 });
 
-test('A selected image that does not load as an image surfaces an error, sends nothing, and clears loading', async () => {
-    const { doc, calls, pe } = await boot({
-        prompt: 'a cat',
-        settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'data:text/html;base64,PHA+NDA0PC9wPg==' }
-    });
-    await pe.genTab.handleEnhance();
-    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no request when the attached image is not an image');
-    assert.strictEqual(calls.showError.length, 1, 'the failure is surfaced');
-    assert.ok(calls.showError[0]!.includes('did not load as an image'), 'the error says why');
-    assert.strictEqual((doc.getElementById('pe_enhance_btn') as HTMLButtonElement).disabled, false, 'loading clears');
-});
-
-test('A selected image is read through SwarmUI\'s imageToData and attached as base64 media', async () => {
-    const { calls, pe } = await boot({
-        prompt: 'a cat',
-        settings: { sendSelectedImage: true, replaceMode: 'preview' },
-        image: { src: 'data:image/png;base64,QUJD' }
-    });
+test('Current PromptImages are sent in exact order with explicit Image 1..N labels', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
+    const area = doc.getElementById('alt_prompt_image_area')!;
+    for (const raw of ['QUJD', 'REVG']) {
+        const img = doc.createElement('img');
+        img.className = 'alt-prompt-image';
+        img.dataset.filedata = `data:image/png;base64,${raw}`;
+        area.appendChild(img);
+    }
     await pe.genTab.handleEnhance();
     const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
     assert.strictEqual(runs.length, 1, 'one enhance request');
-    const media = runs[0]!.payload.media;
-    assert.ok(Array.isArray(media) && media.length === 1, 'one image part');
-    assert.strictEqual(media[0]!.data, 'QUJD', 'base64 read by the host helper');
-    assert.strictEqual(media[0]!.mediaType, 'image/png', 'media type from the data URL');
+    const images = runs[0]!.payload.context!.promptImages;
+    assert.deepStrictEqual(images.map((image) => image.label), ['Image 1', 'Image 2'], 'ordinal identity is explicit');
+    assert.deepStrictEqual(images.map((image) => image.data), ['QUJD', 'REVG'], 'DOM/PromptImages order is preserved');
 });
 
-test('No selected image is a text-only request', async () => {
-    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendSelectedImage: true, replaceMode: 'preview' } });
+test('A current PromptImage with no Swarm media source fails instead of being silently dropped', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
+    const img = doc.createElement('img');
+    img.className = 'alt-prompt-image';
+    doc.getElementById('alt_prompt_image_area')!.appendChild(img);
+    await pe.genTab.handleEnhance();
+    assert.strictEqual(calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun').length, 0, 'no backend call with incomplete requested context');
+    assert.ok(calls.showError.some((message) => message.includes('Image 1')), 'the missing image is named in the error');
+});
+
+test('No current PromptImages produces an explicit empty current-image context', async () => {
+    const { calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: false } });
     await pe.genTab.handleEnhance();
     const runs = calls.genericRequest.filter((c) => c.route === 'PromptEnhanceRun');
-    assert.strictEqual(runs.length, 1, 'one text-only request');
-    assert.strictEqual(runs[0]!.payload.media, undefined, 'no media attached');
+    assert.strictEqual(runs.length, 1);
+    assert.deepStrictEqual(runs[0]!.payload.context!.promptImages, []);
+});
+
+test('Past generations are grouped by exact request_id and keep every output plus raw metadata', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'new prompt', settings: { pastGenerations: 1, sendActiveModelContext: false } });
+    const batch = doc.getElementById('current_image_batch')!;
+    const meta0 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 1 } });
+    const meta1 = JSON.stringify({ sui_image_params: { prompt: 'old prompt', seed: 2 } });
+    for (const [index, raw, metadata] of [[0, 'QUJD', meta0], [1, 'REVG', meta1]] as const) {
+        const block = doc.createElement('div');
+        block.className = 'image-block';
+        block.dataset.request_id = '77';
+        block.dataset.batch_id = `77_${index}`;
+        block.dataset.src = `data:image/png;base64,${raw}`;
+        block.dataset.metadata = metadata;
+        batch.appendChild(block);
+    }
+    pe.context.scanHistoryDom();
+    await pe.genTab.handleEnhance();
+    const history = calls.genericRequest.find((c) => c.route === 'PromptEnhanceRun')!.payload.context!.pastGenerations;
+    assert.strictEqual(history.length, 1);
+    assert.strictEqual(history[0]!.requestId, '77');
+    assert.strictEqual(history[0]!.prompt, 'old prompt');
+    assert.deepStrictEqual(history[0]!.outputs.map((output) => output.image.label), ['Past Generation 1 Output 1', 'Past Generation 1 Output 2']);
+    assert.deepStrictEqual(history[0]!.outputs.map((output) => output.metadata), [meta0, meta1]);
+});
+
+test('Active model context carries model metadata and effective LoRA model/TEnc/scope values', async () => {
+    const { doc, calls, pe } = await boot({ prompt: 'a cat', settings: { sendActiveModelContext: true } });
+    const model = doc.getElementById('input_model') as HTMLSelectElement;
+    model.add(new Option('base-model', 'base-model'));
+    model.value = 'base-model';
+    const loras = doc.getElementById('input_loras') as HTMLSelectElement;
+    for (const name of ['lora-a', 'lora-b']) {
+        const option = new Option(name, name, true, true);
+        loras.add(option);
+    }
+    (doc.getElementById('input_loraweights') as HTMLInputElement).value = '0.8';
+    (doc.getElementById('input_loratencweights') as HTMLInputElement).value = '0.5';
+    (doc.getElementById('input_lorasectionconfinement') as HTMLInputElement).value = '5,0';
+    await pe.genTab.handleEnhance();
+    const active = calls.genericRequest.find((c) => c.route === 'PromptEnhanceRun')!.payload.context!.activeModel!;
+    assert.strictEqual(active.baseModel!.name, 'base-model');
+    assert.strictEqual(active.baseModel!.triggerPhrase, 'trigger:base-model');
+    assert.strictEqual(active.loras[0]!.weight, 0.8);
+    assert.strictEqual(active.loras[0]!.textEncoderWeight, 0.5);
+    assert.strictEqual(active.loras[0]!.scope, 'Base');
+    assert.strictEqual(active.loras[1]!.weight, 1, 'missing model weight uses Swarm runtime default');
+    assert.strictEqual(active.loras[1]!.textEncoderWeight, 1, 'missing TEnc weight falls back to the effective model weight');
+    assert.strictEqual(active.loras[1]!.scope, 'Global');
 });
 
 test('Loading clears on backend failure and the server error is surfaced', async () => {
