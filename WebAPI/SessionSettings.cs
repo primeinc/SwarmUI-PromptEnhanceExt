@@ -36,25 +36,33 @@ public class SessionSettings
         "baseUrl", "model", "timeoutSeconds", "systemPrompt", "temperature", "maxTokens", "sendPromptImages", "pastGenerations", "sendActiveModelContext", "replaceMode"
     ];
 
-    /// <summary>Parses the stored settings blob, treating unparseable data as absent.</summary>
+    /// <summary>Parses the stored settings blob and validates it with <see cref="ValidateSettings"/>, treating unparseable or invalid data as absent.</summary>
     private static JObject TryParseStored(string stored)
     {
         if (string.IsNullOrWhiteSpace(stored))
         {
             return null;
         }
+        string problem;
         try
         {
-            return JObject.Parse(stored);
+            JObject parsed = JObject.Parse(stored);
+            JObject validationError = ValidateSettings(parsed);
+            if (validationError == null)
+            {
+                return parsed;
+            }
+            problem = validationError["error"].Value<string>();
         }
         catch (Newtonsoft.Json.JsonException ex)
         {
-            Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save; the corrupt data is kept under the '{CORRUPT_BACKUP_SUBKEY}' subkey): {ex.Message}");
-            return null;
+            problem = ex.Message;
         }
+        Logs.Warning($"[PromptEnhance] Stored settings are corrupt and will be ignored (defaults apply until the next save; the corrupt data is kept under the '{CORRUPT_BACKUP_SUBKEY}' subkey): {problem}");
+        return null;
     }
 
-    /// <summary>Reads and parses the stored settings. Unparseable data is backed up once under <see cref="CORRUPT_BACKUP_SUBKEY"/> and <paramref name="recovered"/> is set.</summary>
+    /// <summary>Reads and parses the stored settings. Unparseable or invalid data is backed up once under <see cref="CORRUPT_BACKUP_SUBKEY"/> and <paramref name="recovered"/> is set.</summary>
     private static JObject ReadStored(Session session, out bool recovered)
     {
         string stored = session.User.GetGenericData(SETTINGS_KEY, SETTINGS_SUBKEY);
@@ -77,7 +85,7 @@ public class SessionSettings
         return storedObj;
     }
 
-    /// <summary>The user's effective settings: stored values merged over <see cref="Defaults"/>, per known key. <paramref name="recovered"/> is set when the stored blob was corrupt and the defaults apply.</summary>
+    /// <summary>The user's effective settings: stored values merged over <see cref="Defaults"/>, per known key. Every value is valid per <see cref="ValidateSettings"/>. <paramref name="recovered"/> is set when the stored blob was corrupt or invalid and the defaults apply.</summary>
     public static JObject Effective(Session session, out bool recovered)
     {
         JObject settings = Defaults;
@@ -155,18 +163,7 @@ public class SessionSettings
             {
                 return Task.FromResult(validationError);
             }
-            JObject merged = Defaults;
-            JObject storedObj = ReadStored(session, out bool recovered);
-            if (storedObj != null)
-            {
-                foreach (string key in KnownKeys)
-                {
-                    if (storedObj[key] != null && storedObj[key].Type != JTokenType.Null)
-                    {
-                        merged[key] = storedObj[key];
-                    }
-                }
-            }
+            JObject merged = Effective(session, out bool recovered);
             foreach (string key in KnownKeys)
             {
                 if (incoming[key] != null && incoming[key].Type != JTokenType.Null)

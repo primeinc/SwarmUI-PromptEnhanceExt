@@ -31,20 +31,22 @@ public class GenerationHistoryTests : IDisposable
 
     private static MediaFile Png(string base64) => ImageFile.FromDataString($"data:image/png;base64,{base64}");
 
-    /// <summary>Runs one request through the generate event (once per output, with that output's resolved prompt) and then the batch event, as SwarmUI does.</summary>
+    /// <summary>Runs one output through the generate event with its resolved prompt, as SwarmUI does per output.</summary>
+    private static T2IEngine.ImageOutput GenerateOutput(T2IParamInput request, string prompt, string png)
+    {
+        T2IParamInput perOutput = request.Clone();
+        perOutput.Set(T2IParamTypes.Prompt, prompt);
+        MediaFile file = Png(png);
+        WebAPI.GenerationHistory.OnPostGenerate(new T2IEngine.PostGenerationEventParams(file, perOutput, () => { }));
+        return new T2IEngine.ImageOutput { File = file, ActualFileTask = Task.FromResult(file) };
+    }
+
+    /// <summary>Runs one request through the generate event (once per output) and then the batch event, as SwarmUI does.</summary>
     private static T2IParamInput Generate(Session session, DateTime at, params (string Prompt, string Png)[] outputs)
     {
         T2IParamInput request = new(session);
-        List<T2IEngine.ImageOutput> images = [];
-        foreach ((string prompt, string png) in outputs)
-        {
-            T2IParamInput perOutput = request.Clone();
-            perOutput.Set(T2IParamTypes.Prompt, prompt);
-            MediaFile file = Png(png);
-            WebAPI.GenerationHistory.OnPostGenerate(new T2IEngine.PostGenerationEventParams(file, perOutput, () => { }));
-            images.Add(new T2IEngine.ImageOutput { File = file, ActualFileTask = Task.FromResult(file) });
-        }
-        WebAPI.GenerationHistory.Record(request, [.. images], at);
+        T2IEngine.ImageOutput[] images = [.. outputs.Select(output => GenerateOutput(request, output.Prompt, output.Png))];
+        WebAPI.GenerationHistory.Record(request, images, at);
         return request;
     }
 
@@ -144,7 +146,35 @@ public class GenerationHistoryTests : IDisposable
         InvalidOperationException ex = Xunit.Assert.Throws<InvalidOperationException>(() =>
             WebAPI.GenerationHistory.Record(new T2IParamInput(session), [new T2IEngine.ImageOutput { File = file, ActualFileTask = Task.FromResult(file) }], T0));
 
-        Xunit.Assert.Contains("without a capture", ex.Message);
+        Xunit.Assert.Contains("without an entry from the generate event", ex.Message);
+    }
+
+    [Xunit.Fact]
+    public void TurningPastGenerationsOn_DuringARequest_LeavesThatRequestUnrecordedWithoutError()
+    {
+        Session session = UserWithHistory(0);
+        T2IParamInput request = new(session);
+        T2IEngine.ImageOutput first = GenerateOutput(request, "before the toggle", SwarmHost.PngBase64);
+        SwarmHost.SaveSettings(session, """{"pastGenerations":2}""");
+        T2IEngine.ImageOutput second = GenerateOutput(request, "after the toggle", SwarmHost.PngBase64B);
+
+        WebAPI.GenerationHistory.Record(request, [first, second], T0);
+
+        Xunit.Assert.Empty(WebAPI.GenerationHistory.Recent(session.User.UserID, 10));
+    }
+
+    [Xunit.Fact]
+    public void TurningPastGenerationsOff_DuringARequest_LeavesThatRequestUnrecorded()
+    {
+        Session session = UserWithHistory(2);
+        T2IParamInput request = new(session);
+        T2IEngine.ImageOutput output = GenerateOutput(request, "captured", SwarmHost.PngBase64);
+        SwarmHost.SaveSettings(session, """{"pastGenerations":0}""");
+
+        WebAPI.GenerationHistory.Record(request, [output], T0);
+        SwarmHost.SaveSettings(session, """{"pastGenerations":2}""");
+
+        Xunit.Assert.Empty(WebAPI.GenerationHistory.Recent(session.User.UserID, 10));
     }
 
     [Xunit.Fact]

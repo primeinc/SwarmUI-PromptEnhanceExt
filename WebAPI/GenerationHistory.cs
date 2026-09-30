@@ -56,8 +56,12 @@ public static class GenerationHistory
         public List<OutputEntry> Outputs { get; set; } = [];
     }
 
-    /// <summary>What <see cref="OnPostGenerate"/> captured for one output, keyed by its <see cref="MediaFile"/> instance until the request's batch event.</summary>
-    private record class CapturedOutput(string Prompt, string Metadata);
+    /// <summary>What <see cref="OnPostGenerate"/> decided and captured for one still-image output, keyed by its <see cref="MediaFile"/> instance until the request's batch event. <see cref="Recording"/> is false when the output was generated while recording was off.</summary>
+    private record class CapturedOutput(bool Recording, string Prompt, string Metadata)
+    {
+        /// <summary>An output generated while recording was off.</summary>
+        public static readonly CapturedOutput Declined = new(false, null, null);
+    }
 
     /// <summary>Per-output captures, keyed by object identity; entries disappear with their <see cref="MediaFile"/>.</summary>
     private static readonly ConditionalWeakTable<MediaFile, CapturedOutput> Captured = [];
@@ -130,18 +134,23 @@ public static class GenerationHistory
         return SessionSettings.Effective(session, out _)["pastGenerations"].Value<int>() > 0;
     }
 
-    /// <summary>Captures one output's resolved prompt and metadata. <see cref="T2IEngine.PostGenerateEvent"/> gives the per-output input after prompt resolution; the batch event does not.
+    /// <summary>Records, for one still-image output, whether recording was on and, when it was, the resolved prompt and metadata. <see cref="T2IEngine.PostGenerateEvent"/> gives the per-output input after prompt resolution; the batch event does not.
     /// SwarmUI invokes this unguarded inside the backend's output loop, so a failure is logged as an error and never thrown into SwarmUI.</summary>
     public static void OnPostGenerate(T2IEngine.PostGenerationEventParams generated)
     {
         try
         {
-            if (generated.File?.Type?.MetaType != MediaMetaType.Image || !ShouldRecord(generated.UserInput))
+            if (generated.File?.Type?.MetaType != MediaMetaType.Image)
             {
                 return;
             }
+            if (!ShouldRecord(generated.UserInput))
+            {
+                Captured.AddOrUpdate(generated.File, CapturedOutput.Declined);
+                return;
+            }
             T2IParamInput snapshot = generated.UserInput.Clone();
-            Captured.AddOrUpdate(generated.File, new CapturedOutput(snapshot.Get(T2IParamTypes.Prompt, ""), snapshot.GenRawMetadata()));
+            Captured.AddOrUpdate(generated.File, new CapturedOutput(true, snapshot.Get(T2IParamTypes.Prompt, ""), snapshot.GenRawMetadata()));
         }
         catch (Exception ex)
         {
@@ -162,14 +171,12 @@ public static class GenerationHistory
         }
     }
 
-    /// <summary>Records the still-image outputs of one finished request and prunes the user's history to <see cref="MaxRequestsPerUser"/>. Throws when an output has no capture from <see cref="OnPostGenerate"/>.</summary>
+    /// <summary>Records the still-image outputs of one finished request and prunes the user's history to <see cref="MaxRequestsPerUser"/>.
+    /// A request is recorded only when recording was on for every output and still is at the batch event; a setting change during the request leaves it unrecorded.
+    /// Throws when an output has no entry from <see cref="OnPostGenerate"/>: the two events failed to pair.</summary>
     public static void Record(T2IParamInput input, T2IEngine.ImageOutput[] images, DateTime recordedAt)
     {
-        if (!ShouldRecord(input))
-        {
-            return;
-        }
-        List<(MediaFile File, CapturedOutput Captured)> outputs = [];
+        List<(T2IEngine.ImageOutput Image, CapturedOutput Captured)> captures = [];
         foreach (T2IEngine.ImageOutput image in images)
         {
             if (image.File.Type.MetaType != MediaMetaType.Image)
@@ -178,14 +185,19 @@ public static class GenerationHistory
             }
             if (!Captured.TryGetValue(image.File, out CapturedOutput captured))
             {
-                throw new InvalidOperationException($"An output of request {input.UserRequestId} reached the batch event without a capture from the generate event.");
+                throw new InvalidOperationException($"An output of request {input.UserRequestId} reached the batch event without an entry from the generate event.");
             }
-            MediaFile final = image.ActualFileTask?.GetAwaiter().GetResult() ?? throw new InvalidOperationException($"An output of request {input.UserRequestId} has no final file.");
-            outputs.Add((final, captured));
+            captures.Add((image, captured));
         }
-        if (outputs.Count == 0)
+        if (captures.Count == 0 || captures.Exists(c => !c.Captured.Recording) || !ShouldRecord(input))
         {
             return;
+        }
+        List<(MediaFile File, CapturedOutput Captured)> outputs = [];
+        foreach ((T2IEngine.ImageOutput image, CapturedOutput captured) in captures)
+        {
+            MediaFile final = image.ActualFileTask?.GetAwaiter().GetResult() ?? throw new InvalidOperationException($"An output of request {input.UserRequestId} has no final file.");
+            outputs.Add((final, captured));
         }
         string userId = input.SourceSession.User.UserID;
         lock (DatabaseLock)

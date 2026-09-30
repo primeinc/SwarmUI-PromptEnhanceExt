@@ -277,6 +277,28 @@ public class SessionSettingsTests
         Xunit.Assert.Equal("{ this is not json", session.User.GetGenericData("promptenhance", "config_corrupt_backup"));
     }
 
+    [Xunit.Theory]
+    [Xunit.InlineData("""{"pastGenerations":"3"}""")]
+    [Xunit.InlineData("""{"pastGenerations":11}""")]
+    [Xunit.InlineData("""{"sendPromptImages":"yes"}""")]
+    [Xunit.InlineData("""{"sendActiveModelContext":1}""")]
+    [Xunit.InlineData("""{"model":["llama3"]}""")]
+    [Xunit.InlineData("""{"temperature":"hot"}""")]
+    [Xunit.InlineData("""{"replaceMode":"overwrite"}""")]
+    [Xunit.InlineData("""[1,2]""")]
+    public void Effective_WithWellFormedButInvalidStoredData_DegradesToDefaults_FlagsAndBacksUp(string stored)
+    {
+        Session session = MakeRealSession();
+        session.User.SaveGenericData("promptenhance", "config", stored);
+
+        JObject settings = WebAPI.SessionSettings.Effective(session, out bool recovered);
+
+        Xunit.Assert.True(recovered);
+        Xunit.Assert.True(JToken.DeepEquals(WebAPI.SessionSettings.Defaults, settings));
+        Xunit.Assert.Equal(0, settings["pastGenerations"]!.Value<int>());
+        Xunit.Assert.Equal(stored, session.User.GetGenericData("promptenhance", "config_corrupt_backup"));
+    }
+
     [Xunit.Fact]
     public async Task CorruptStoreBackup_FirstCorruptionWins_LaterCorruptStateDoesNotClobberIt()
     {
