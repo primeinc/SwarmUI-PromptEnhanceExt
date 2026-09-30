@@ -229,7 +229,7 @@ public class BackendClient
             // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, generic
         """)]
     public static async Task<JObject> PromptEnhanceRun(
-        [API.APIParameter("The request body: `prompt` (string, required, the text to enhance) and optional `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: 'image/png' or similar } sent to the model as images.")] JObject raw,
+        [API.APIParameter("The request body: `prompt` (string, required), optional legacy `media`, and optional `context` containing ordered `promptImages`, `pastGenerations`, and `activeModel` data collected from SwarmUI.")] JObject raw,
         Session session)
     {
         string userText = raw?["prompt"]?.ToString();
@@ -270,7 +270,7 @@ public class BackendClient
         return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey, context);
     }
 
-    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
+    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried any image context is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
     public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null, BackendSchema.PromptContext context = null)
     {
         if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
