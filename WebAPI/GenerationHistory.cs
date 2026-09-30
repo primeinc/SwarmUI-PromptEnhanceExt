@@ -229,6 +229,7 @@ public static class GenerationHistory
             return null;
         }
         string userId = session.User.UserID;
+        // Epoch before setting: saving 0 persists before Forget bumps the epoch, so a request is refused either here or by Record's epoch check.
         long epoch = Epochs.GetValueOrDefault(userId);
         if (SessionSettings.Effective(session, out _)["pastGenerations"].Value<int>() <= 0)
         {

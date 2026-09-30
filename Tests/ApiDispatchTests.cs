@@ -6,11 +6,17 @@ namespace PromptEnhance.Tests;
 [Xunit.Collection(ApiRegistryCollectionDefinition.Name)]
 public class ApiDispatchTests
 {
-    [Xunit.Fact]
-    public async Task PromptEnhanceRun_DispatchedWithEmptyPrompt_ReturnsInvalidRequest()
+    [Xunit.Theory]
+    [Xunit.InlineData("""{}""")]
+    [Xunit.InlineData("""{"prompt":""}""")]
+    [Xunit.InlineData("""{"prompt":null}""")]
+    [Xunit.InlineData("""{"prompt":{"a":1}}""")]
+    [Xunit.InlineData("""{"prompt":["x"]}""")]
+    [Xunit.InlineData("""{"prompt":5}""")]
+    public async Task PromptEnhanceRun_DispatchedWithoutAStringPrompt_ReturnsInvalidRequest(string json)
     {
         SwarmUI.WebAPI.APICall call = SwarmUI.WebAPI.API.APIHandlers["promptenhancerun"];
-        JObject input = new() { ["prompt"] = "" };
+        JObject input = JObject.Parse(json);
 
         JObject result = await call.Call(null!, null!, null!, input);
 

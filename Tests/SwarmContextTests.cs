@@ -113,7 +113,7 @@ public class SwarmContextTests
         Session session = SwarmHost.PermittedSession();
         SwarmHost.SaveSettings(session, """{"baseUrl":"http://127.0.0.1:9","model":"m","sendActiveModelContext":true}""");
 
-        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, "a cat", new JObject { ["prompt"] = "a cat" });
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, new JObject { ["prompt"] = "a cat" });
 
         Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains("swarmInput", result["error"]!.Value<string>());

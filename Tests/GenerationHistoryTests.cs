@@ -329,6 +329,43 @@ public class GenerationHistoryTests : IDisposable
     }
 
     [Xunit.Fact]
+    public async Task Enhance_WithoutAModel_IsModelMissing_BeforeTheHistoryIsConsulted()
+    {
+        Session session = SwarmHost.PermittedSession();
+        SwarmHost.SaveSettings(session, """{"baseUrl":"http://127.0.0.1:9","model":"","pastGenerations":2}""");
+        WebAPI.GenerationHistory.Close();
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, new JObject { ["prompt"] = "a cat" });
+
+        Xunit.Assert.Equal("model_missing", result["error_id"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task Enhance_WithPastGenerationsOnAndTheStoreClosed_SaysSo()
+    {
+        Session session = SwarmHost.PermittedSession();
+        SwarmHost.SaveSettings(session, """{"baseUrl":"http://127.0.0.1:9","model":"m","pastGenerations":2}""");
+        WebAPI.GenerationHistory.Close();
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, new JObject { ["prompt"] = "a cat" });
+
+        Xunit.Assert.Equal("generic", result["error_id"]!.Value<string>());
+        Xunit.Assert.Contains("history store did not open", result["error"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public async Task Enhance_WithTheBackendDown_IsServerUnavailable_WithPastGenerationsOn()
+    {
+        Session session = UserWithHistory(2);
+        await Generate(session, T0, ("recorded", SwarmHost.PngBase64));
+        SwarmHost.SaveSettings(session, """{"baseUrl":"http://127.0.0.1:9","model":"m","pastGenerations":2}""");
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, new JObject { ["prompt"] = "a cat" });
+
+        Xunit.Assert.Equal("server_unavailable", result["error_id"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
     public async Task TurningPastGenerationsOn_IsRejected_WhenTheStoreDidNotOpen()
     {
         Session session = UserWithHistory(0);

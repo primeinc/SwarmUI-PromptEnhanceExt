@@ -45,7 +45,7 @@ public class BackendClientTests
     {
         JObject rawInput = JObject.Parse(rawJson);
 
-        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, rawInput["prompt"]?.Value<string>()!, rawInput);
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, rawInput);
 
         Xunit.Assert.False(result["success"]!.Value<bool>());
         Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
@@ -61,7 +61,7 @@ public class BackendClientTests
     {
         JObject rawInput = JObject.Parse(rawJson);
 
-        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, "a cat", rawInput);
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, rawInput);
 
         Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains(expected, result["error"]!.Value<string>());

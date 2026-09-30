@@ -72,7 +72,7 @@ public class ApiKeyTests
     public async Task PromptEnhanceRun_SendsTheSessionUsersTrimmedKey_OnTheChatCallOnly()
     {
         using MockHttpServer server = new(200, "OK", ChatBody);
-        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(SessionFor(server, "  sk-user  "), "a cat", new JObject { ["prompt"] = "a cat" });
+        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(SessionFor(server, "  sk-user  "), new JObject { ["prompt"] = "a cat" });
         Xunit.Assert.True(r["success"]!.Value<bool>(), r.ToString());
         string chatHead = server.RequestHeads.Single(head => head.StartsWith("POST /v1/chat/completions", StringComparison.Ordinal));
         Xunit.Assert.Contains("Authorization: Bearer sk-user\r\n", chatHead + "\r\n");
@@ -97,7 +97,7 @@ public class ApiKeyTests
     public async Task KeyThatCannotBeAHeaderValue_IsRejectedWithoutSendingOrEchoingIt(string key)
     {
         using MockHttpServer server = new(200, "OK", ChatBody);
-        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(SessionFor(server, key), "a cat", new JObject { ["prompt"] = "a cat" });
+        JObject r = await WebAPI.BackendClient.PromptEnhanceRun(SessionFor(server, key), new JObject { ["prompt"] = "a cat" });
         Xunit.Assert.False(r["success"]!.Value<bool>());
         Xunit.Assert.Equal("authentication", r["error_id"]!.Value<string>());
         Xunit.Assert.DoesNotContain("sk-bad", r.ToString());
