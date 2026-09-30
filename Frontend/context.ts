@@ -76,12 +76,12 @@ class PromptEnhanceContext {
                 sui_image_params?: { prompt?: unknown };
                 sui_extra_data?: { original_prompt?: unknown };
             };
-            let original = parsed.sui_extra_data?.original_prompt;
-            if (typeof original == 'string') {
-                return original;
-            }
             let prompt = parsed.sui_image_params?.prompt;
-            return typeof prompt == 'string' ? prompt : '';
+            if (typeof prompt == 'string') {
+                return prompt;
+            }
+            let original = parsed.sui_extra_data?.original_prompt;
+            return typeof original == 'string' ? original : '';
         }
         catch {
             return '';
