@@ -1,6 +1,6 @@
 # PromptEnhance
 
-A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt (and optionally the selected image) to an OpenAI-compatible chat server you configure, such as Ollama, LM Studio, or llama.cpp's server. The server rewrites the prompt into a more detailed one, and the result is shown for approval, appended, or swapped in with a Restore button.
+A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt to an OpenAI-compatible chat server you configure, such as Ollama, LM Studio, or llama.cpp's server. Optional context can include the ordered SwarmUI Prompt Images, recent generation attempts with their output images, and the active base-model/LoRA stack. The server rewrites the prompt into a more detailed one, and the result is shown for approval, appended, or swapped in with a Restore button.
 
 ![The Enhance Prompt button and settings gear above the Generate-tab prompt box](screenshots/enhance-button.png)
 
@@ -43,7 +43,13 @@ After a replace (whether from **Apply** in Preview mode or from Replace mode), a
 
 The screenshots come from the extension's browser tests, which run it against a stub server that answers `ENHANCED: <your prompt>`. A real model returns a rewritten prompt.
 
-**Send Selected Image** attaches the image currently selected on the Generate tab to the request, which needs a vision-capable model. With no image selected, the request is text-only.
+PromptEnhance has three independent context controls:
+
+- **Send Prompt Images** sends the complete ordered SwarmUI Prompt Images set. The enhancer sees them as **Image 1**, **Image 2**, and so on, matching SwarmUI's current `promptimages[0]`, `promptimages[1]`, ... ordering.
+- **Past Generations to Include** sends the last N generation attempts from the current page session, oldest to newest. Each attempt stays grouped by SwarmUI request id and carries the prompt, every output image from that attempt, and the raw Swarm metadata for each output. `0` disables history feedback.
+- **Send Active Model Context** sends the selected base model plus active LoRA metadata. For each LoRA it includes the effective model weight, effective text-encoder weight, section scope, trigger phrase, usage hint, description, and tags when available.
+
+Current Prompt Images and past-generation outputs use separate namespaces, so **Image 1** never means a historical output. Model metadata lookup is best-effort; current Prompt Images and requested history images are not silently dropped when enabled.
 
 Settings are saved per user, on the server. Each field in the settings modal has a **?** popover describing it.
 
@@ -61,7 +67,7 @@ Errors from **Enhance Prompt** appear in SwarmUI's error banner. Errors in the s
 | `Base URL must be a valid http(s) URL…` | Save rejected the Base URL; use an absolute URL such as `http://localhost:11434`. |
 | `The LLM backend rejected the request as unauthorized…` | The server needs an API key, or the saved one is wrong. Set it under **User → API Keys**; see [API keys](#api-keys). The server's own reason follows under **Detail**. |
 | `The saved PromptEnhance API key contains spaces, line breaks, or non-ASCII characters…` | Re-enter the key under **User → API Keys**; a stray character was likely pasted with it. It was not sent. |
-| `The selected model rejected the attached image…` | Use a vision model, or turn off **Send Selected Image**. |
+| `The selected model rejected the attached image…` | Use a vision model, or disable **Send Prompt Images** and set **Past Generations to Include** to `0`. |
 | `The request to the LLM backend timed out…` | Raise **Timeout (s)**, or use a faster model. |
 
 ## Permissions
@@ -83,7 +89,7 @@ This extension makes outbound web connections **only to the base URL configured 
 | --- | --- | --- |
 | `GET {baseUrl}/v1/models` | Before every model-list or enhance call | Reachability probe. Only transport failures (connection refused, DNS) count as unreachable; no response within 3 seconds counts as reachable and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
 | `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. Carries the API key, if one is set. |
-| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
+| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt and user prompt plus any enabled canonical context: ordered Prompt Images, recent generation attempts with outputs/metadata, and active model/LoRA context. |
 
 The reachability probe never carries the key. No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested:
 - Redirects are not followed; a 3xx answer is reported as an error naming its target.
@@ -93,7 +99,7 @@ There is no telemetry, no update check, and no analytics of any kind.
 
 ## Settings
 
-Settings are stored per-user through SwarmUI's user-data store. **Reset** in the settings modal restores every key to its default. The eight keys and their defaults:
+Settings are stored per-user through SwarmUI's user-data store. **Reset** in the settings modal restores every key to its default. The ten keys and their defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -103,7 +109,9 @@ Settings are stored per-user through SwarmUI's user-data store. **Reset** in the
 | `systemPrompt` | `You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.` | System message sent with every enhance call. |
 | `temperature` | `0.7` | Sampling temperature, 0 to 2. |
 | `maxTokens` | `1024` | `max_tokens` for the chat completion. |
-| `sendSelectedImage` | `false` | When enabled, attaches the currently selected Generate-tab image to the enhance request. Requires a vision-capable model. |
+| `sendPromptImages` | `false` | When enabled, sends the complete ordered SwarmUI Prompt Images set as current multimodal context. Requires a vision-capable enhancer model. |
+| `pastGenerations` | `0` | Number of prior generation attempts from the current page session to send as visual feedback, from 0 to 10. Each attempt includes its prompt, all outputs, and raw output metadata. |
+| `sendActiveModelContext` | `false` | When enabled, sends selected base-model and active-LoRA semantic/runtime context, including effective weights, text-encoder weights, scopes, trigger phrases, usage hints, descriptions, and tags when available. |
 | `replaceMode` | `preview` | How the enhanced prompt is applied: `preview`, `append`, or `replace_with_restore`. |
 
 ## API keys
