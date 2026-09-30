@@ -68,6 +68,13 @@ public class ContractParityTests
         Xunit.Assert.NotNull(WebAPI.SessionSettings.ValidateSettings(new JObject { ["maxTokens"] = maxTokensMin - 1 }));
         Xunit.Assert.NotNull(WebAPI.SessionSettings.ValidateSettings(new JObject { ["maxTokens"] = maxTokensMax + 1 }));
 
+        long historyMin = specs["pastGenerations"]!["min"]!.Value<long>();
+        long historyMax = specs["pastGenerations"]!["max"]!.Value<long>();
+        Xunit.Assert.Null(WebAPI.SessionSettings.ValidateSettings(new JObject { ["pastGenerations"] = historyMin }));
+        Xunit.Assert.Null(WebAPI.SessionSettings.ValidateSettings(new JObject { ["pastGenerations"] = historyMax }));
+        Xunit.Assert.NotNull(WebAPI.SessionSettings.ValidateSettings(new JObject { ["pastGenerations"] = historyMin - 1 }));
+        Xunit.Assert.NotNull(WebAPI.SessionSettings.ValidateSettings(new JObject { ["pastGenerations"] = historyMax + 1 }));
+
         foreach (JToken mode in (JArray)specs["replaceMode"]!["enum"]!)
         {
             Xunit.Assert.Null(WebAPI.SessionSettings.ValidateSettings(new JObject { ["replaceMode"] = mode.Value<string>() }));
