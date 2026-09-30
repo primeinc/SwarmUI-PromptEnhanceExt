@@ -181,18 +181,12 @@ class PromptEnhanceGenTab {
             let payload: PEEnhancePayload = {
                 prompt: original.trim(),
                 context: {
-                    promptImages: await promptEnhanceContext.collectPromptImages(),
+                    promptImages: settings.sendPromptImages ? await promptEnhanceContext.collectPromptImages() : [],
                     pastGenerations: await promptEnhanceContext.collectPastGenerations(settings.pastGenerations)
                 }
             };
             if (settings.sendActiveModelContext) {
                 payload.context!.activeModel = await promptEnhanceContext.collectActiveModelContext();
-            }
-            if (settings.sendSelectedImage) {
-                let image = await this.getSelectedImage();
-                if (image) {
-                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType, label: 'Selected Generate-tab Image' }];
-                }
             }
             let result = await this.enhanceRequest(payload);
             if (result.ok) {
