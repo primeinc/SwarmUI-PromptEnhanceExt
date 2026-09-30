@@ -142,6 +142,39 @@ public class ContextSchemaTests
         Xunit.Assert.Equal("base-token", context.ActiveModel.BaseModel.TriggerPhrase);
     }
 
+    [Xunit.Theory]
+    [Xunit.InlineData("[]")]
+    [Xunit.InlineData("{\"promptImages\":{}}")]
+    [Xunit.InlineData("{\"promptImages\":[null]}")]
+    [Xunit.InlineData("{\"pastGenerations\":{}}")]
+    [Xunit.InlineData("{\"pastGenerations\":[null]}")]
+    [Xunit.InlineData("{\"pastGenerations\":[{\"requestId\":\"9\",\"prompt\":\"x\",\"outputs\":{}}]}")]
+    [Xunit.InlineData("{\"pastGenerations\":[{\"requestId\":\"9\",\"prompt\":\"x\",\"outputs\":[null]}]}")]
+    [Xunit.InlineData("{\"activeModel\":[]}")]
+    [Xunit.InlineData("{\"activeModel\":{\"loras\":{}}}")]
+    [Xunit.InlineData("{\"activeModel\":{\"loras\":[null]}}")]
+    [Xunit.InlineData("{\"activeModel\":{\"loras\":[{\"name\":\"l\",\"weight\":\"bad\",\"textEncoderWeight\":1,\"scopeId\":0,\"scope\":\"Global\"}]}}")]
+    public void ParseContext_RejectsMalformedContainersAndEntries(string json)
+    {
+        JToken raw = JToken.Parse(json);
+
+        Xunit.Assert.Throws<ArgumentException>(() => WebAPI.BackendClient.ParseContext(raw));
+    }
+
+    [Xunit.Fact]
+    public async Task PromptEnhanceRun_MalformedContext_IsClassifiedBeforeSessionUse()
+    {
+        JObject raw = JObject.Parse("""
+        {"prompt":"cat","context":{"promptImages":{}}}
+        """);
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(raw, null!);
+
+        Xunit.Assert.False(result["success"]!.Value<bool>());
+        Xunit.Assert.Equal("unsupported_image", result["error_id"]!.Value<string>());
+        Xunit.Assert.Contains("promptImages", result["error"]!.Value<string>());
+    }
+
     [Xunit.Fact]
     public void ParseContext_RejectsDatalessHistoricalImage()
     {
