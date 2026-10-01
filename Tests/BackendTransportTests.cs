@@ -59,6 +59,25 @@ public class BackendTransportTests
     }
 
     [Xunit.Fact]
+    public async Task PromptEnhanceRun_LegacyMediaWithoutSwarmInput_ForwardsImage()
+    {
+        using MockHttpServer server = new(200, "OK", ChatBody);
+        SwarmUI.Accounts.Session session = SwarmHost.PermittedSession();
+        SwarmHost.SaveSettings(session, $$"""{"baseUrl":"{{server.BaseUrl}}","model":"mock-enhancer"}""");
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(session, JObject.Parse("""{"prompt":"a cat","media":[{"type":"base64","data":"QUJD","mediaType":"image/png"}]}"""));
+
+        Xunit.Assert.True(result["success"]!.Value<bool>());
+        JObject request = JObject.Parse(Xunit.Assert.Single(server.RequestBodies));
+        JArray messages = (JArray)request["messages"]!;
+        JObject user = (JObject)messages.Single(message => message["role"]!.Value<string>() == "user");
+        JArray parts = (JArray)user["content"]!;
+        Xunit.Assert.Contains(parts, part => part["text"]?.Value<string>() == "Image 1");
+        JObject imagePart = parts.OfType<JObject>().Single(part => part["type"]?.Value<string>() == "image_url");
+        Xunit.Assert.Equal("data:image/png;base64,QUJD", imagePart["image_url"]!["url"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
     public async Task ExecuteChat_401_ClassifiesAuthentication()
     {
         using MockHttpServer server = new(401, "Unauthorized", "{\"error\":{\"message\":\"missing key\"}}");
@@ -230,6 +249,9 @@ internal sealed class MockHttpServer : IDisposable
     /// <summary>The header block (request line plus headers) of every request received, in arrival order.</summary>
     public readonly ConcurrentQueue<string> RequestHeads = new();
 
+    /// <summary>The non-empty body of each request received, in arrival order.</summary>
+    public readonly ConcurrentQueue<string> RequestBodies = new();
+
     /// <summary>Listens on <paramref name="port"/> (0 picks a free one). A backend now answering at this URL makes any cached "unreachable" probe result for it stale, so it is forgotten.</summary>
     public MockHttpServer(int status, string reason, string body, int delayMs = 0, string? location = null, int port = 0)
     {
@@ -304,6 +326,11 @@ internal sealed class MockHttpServer : IDisposable
                 string raw = Encoding.ASCII.GetString(received.ToArray());
                 int end = raw.IndexOf("\r\n\r\n", StringComparison.Ordinal);
                 RequestHeads.Enqueue(end >= 0 ? raw[..end] : raw);
+                if (end >= 0 && received.Length > end + 4)
+                {
+                    byte[] requestBytes = received.ToArray();
+                    RequestBodies.Enqueue(Encoding.UTF8.GetString(requestBytes, end + 4, requestBytes.Length - end - 4));
+                }
 
                 if (_delayMs > 0)
                 {

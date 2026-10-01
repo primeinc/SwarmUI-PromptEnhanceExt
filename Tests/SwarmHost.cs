@@ -57,6 +57,7 @@ internal static class SwarmHost
             T2IModelHandler loras = new() { ModelType = "LoRA" };
             loras.Models["lora-a.safetensors"] = Model(loras, "lora-a.safetensors", "Lora A", "trigger-a");
             loras.Models["lora-b.safetensors"] = Model(loras, "lora-b.safetensors", "Lora B", "trigger-b");
+            loras.Models["restricted/hidden.safetensors"] = Model(loras, "restricted/hidden.safetensors", "Hidden LoRA", "hidden-lora-trigger");
             Program.T2IModelSets["Stable-Diffusion"] = main;
             Program.T2IModelSets["LoRA"] = loras;
             // SwarmUI's only built-in extra-model provider reads Program.Backends, which this host does not start; its answer with no remote Swarm backends running is empty (ModelsAPI.cs:47-54).

@@ -283,9 +283,29 @@ public class BackendClient
     }
 
     /// <summary>The top-level keys a PromptEnhanceRun body may carry.</summary>
-    private static readonly HashSet<string> RunBodyKeys = ["prompt", "swarmInput"];
+    private static readonly HashSet<string> RunBodyKeys = ["prompt", "swarmInput", "media"];
 
-    /// <summary>Checks the body shape before any session or settings access: `prompt` is a non-blank string, `swarmInput` (optional) is an object, and nothing else is present. Returns null when valid, else an invalid_request error.</summary>
+    private static bool IsLegacyMediaEntry(JToken entry)
+    {
+        if (entry is not JObject media
+            || !media.TryGetValue("type", out JToken type)
+            || type.Type != JTokenType.String
+            || type.Value<string>() != "base64"
+            || !media.TryGetValue("data", out JToken data)
+            || data.Type != JTokenType.String
+            || string.IsNullOrWhiteSpace(data.Value<string>())
+            || !media.TryGetValue("mediaType", out JToken mediaType)
+            || mediaType.Type != JTokenType.String
+            || !MediaTypeHeaderValue.TryParse(mediaType.Value<string>(), out MediaTypeHeaderValue parsedMediaType)
+            || !parsedMediaType.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            || parsedMediaType.Parameters.Count > 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Checks the body shape before any session or settings access: `prompt` is a non-blank string, `swarmInput` (optional) is an object, and the legacy `media` array is accepted only without `swarmInput`. Returns null when valid, else an invalid_request error.</summary>
     public static JObject ValidateRunBody(JObject raw)
     {
         if (raw == null || !raw.TryGetValue("prompt", out JToken prompt) || prompt.Type != JTokenType.String || string.IsNullOrWhiteSpace(prompt.Value<string>()))
@@ -296,14 +316,40 @@ public class BackendClient
         {
             if (!RunBodyKeys.Contains(property.Name))
             {
-                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, $"'{property.Name}' is not a PromptEnhanceRun field. The body holds `prompt` and optionally `swarmInput`.");
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, $"'{property.Name}' is not a PromptEnhanceRun field. The body holds `prompt` and optionally `swarmInput` or legacy `media`.");
             }
         }
         if (raw.TryGetValue("swarmInput", out JToken swarmInput) && swarmInput is not JObject)
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`swarmInput` must be an object.");
         }
+        if (raw.TryGetValue("media", out JToken legacyMedia))
+        {
+            if (raw.ContainsKey("swarmInput"))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`media` is only supported when `swarmInput` is omitted.");
+            }
+            if (legacyMedia is not JArray mediaEntries || mediaEntries.Any(entry => !IsLegacyMediaEntry(entry)))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`media` must be an array of { type: 'base64', data: <base64 image bytes>, mediaType: <image MIME type> } objects.");
+            }
+        }
         return null;
+    }
+
+    /// <summary>Adds images from the legacy `media` request field to the multimodal context.</summary>
+    private static void AddLegacyMedia(JArray mediaEntries, BackendSchema.PromptContext context)
+    {
+        for (int i = 0; i < mediaEntries.Count; i++)
+        {
+            JObject media = (JObject)mediaEntries[i]!;
+            context.PromptImages.Add(new BackendSchema.MediaContent
+            {
+                Data = media["data"]!.Value<string>(),
+                MediaType = media["mediaType"]!.Value<string>(),
+                Label = $"Image {i + 1}"
+            });
+        }
     }
 
     /// <summary>Builds the request-supplied part of the enhance context from the user's settings: Prompt Images and the active model stack from <paramref name="swarmInput"/> through <see cref="SwarmContext.Resolve"/>. Throws <see cref="ArgumentException"/> for malformed input.
@@ -346,7 +392,7 @@ public class BackendClient
             // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, invalid_request, generic
         """)]
     public static async Task<JObject> PromptEnhanceRun(Session session,
-        [API.APIParameter("The whole request body: `prompt`, the non-blank prompt text to enhance, and optionally `swarmInput`: SwarmUI generation input, keyed by the Generate tab's parameter ids, for the enabled context channels. `promptimages` while Send Prompt Images is on; `model`, `loras`, `loraweights`, `loratencweights`, `lorasectionconfinement` while Send Active Model Context is on. Required while either is on. Past Generations come from the server-side history.")] JObject raw)
+        [API.APIParameter("The request body: `prompt`, the non-blank prompt text to enhance; optionally `swarmInput`, SwarmUI generation input for enabled context channels; or legacy `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: <image MIME type> } objects accepted only when `swarmInput` is omitted. `promptimages` while Send Prompt Images is on; `model`, `loras`, `loraweights`, `loratencweights`, `lorasectionconfinement` while Send Active Model Context is on. `swarmInput` is required while either is on. Past Generations come from the server-side history.")] JObject raw)
     {
         JObject bodyError = ValidateRunBody(raw);
         if (bodyError != null)
@@ -364,6 +410,10 @@ public class BackendClient
         try
         {
             context = BuildContext(session, settings, raw["swarmInput"] as JObject);
+            if (raw["media"] is JArray legacyMedia)
+            {
+                AddLegacyMedia(legacyMedia, context);
+            }
         }
         catch (ArgumentException ex)
         {

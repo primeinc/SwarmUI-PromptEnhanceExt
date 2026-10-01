@@ -26,14 +26,14 @@ public class ApiDispatchTests
     }
 
     [Xunit.Fact]
-    public async Task PromptEnhanceRun_DispatchedWithLegacyMedia_ReturnsInvalidRequest()
+    public async Task PromptEnhanceRun_DispatchedWithLegacyMediaAndSwarmInput_ReturnsInvalidRequest()
     {
         SwarmUI.WebAPI.APICall call = SwarmUI.WebAPI.API.APIHandlers["promptenhancerun"];
-        JObject input = JObject.Parse("""{"prompt":"a cat","media":[{"type":"base64","data":"QUJD","mediaType":"image/png"}]}""");
+        JObject input = JObject.Parse("""{"prompt":"a cat","swarmInput":{},"media":[{"type":"base64","data":"QUJD","mediaType":"image/png"}]}""");
 
         JObject result = await call.Call(null!, null!, null!, input);
 
         Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
-        Xunit.Assert.Contains("'media'", result["error"]!.Value<string>());
+        Xunit.Assert.Contains("only supported", result["error"]!.Value<string>());
     }
 }

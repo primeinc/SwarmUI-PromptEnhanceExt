@@ -116,6 +116,7 @@ public class SwarmContextTests
     public void ModelsTheUsersRoleForbids_AreRejected()
     {
         Xunit.Assert.Throws<ArgumentException>(() => Resolve(SwarmHost.PermittedSession("restricted/"), """{"model":"restricted/hidden"}""", false, true));
+        Xunit.Assert.Throws<ArgumentException>(() => Resolve(SwarmHost.PermittedSession("restricted/"), """{"loras":["restricted/hidden"]}""", false, true));
     }
 
     [Xunit.Fact]

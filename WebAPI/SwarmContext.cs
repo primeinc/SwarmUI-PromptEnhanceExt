@@ -159,9 +159,19 @@ public static class SwarmContext
         List<string> tencWeights = input.Get(T2IParamTypes.LoraTencWeights, []);
         List<string> confinements = input.Get(T2IParamTypes.LoraSectionConfinement, []);
         T2IModelHandler loraHandler = Program.T2IModelSets["LoRA"];
+        List<string> allowedLoras = loraHandler.ListModelNamesFor(input.SourceSession);
         for (int i = 0; i < names.Count; i++)
         {
-            T2IModel lora = loraHandler.GetModel(names[i]) ?? throw new ArgumentException($"LoRA '{names[i]}' is not in SwarmUI's LoRA list.");
+            string allowedName = T2IParamTypes.GetBestModelInList(names[i], allowedLoras);
+            if (allowedName is null
+                || !string.Equals(
+                    T2IParamTypes.CleanNameGeneric(T2IParamTypes.CleanModelName(allowedName)),
+                    T2IParamTypes.CleanNameGeneric(T2IParamTypes.CleanModelName(names[i])),
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"LoRA '{names[i]}' is not in SwarmUI's LoRA list available to this user.");
+            }
+            T2IModel lora = loraHandler.GetModel(allowedName) ?? throw new ArgumentException($"LoRA '{names[i]}' is not in SwarmUI's LoRA list.");
             double weight = ParseNumber(weights[i], $"LoRA '{names[i]}' weight");
             int scopeId = i < confinements.Count ? ParseInteger(confinements[i], $"LoRA '{names[i]}' section confinement") : 0;
             BackendSchema.ModelMetadata metadata = Metadata(lora);

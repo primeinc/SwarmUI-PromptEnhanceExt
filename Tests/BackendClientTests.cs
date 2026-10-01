@@ -53,10 +53,13 @@ public class BackendClientTests
     }
 
     [Xunit.Theory]
-    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":[]}", "'media'")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":\"image\"}", "`media` must be an array")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":[{}]}", "`media` must be an array")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":[{\"type\":\"base64\",\"data\":\"QUJD\",\"mediaType\":\"text/plain\"}]}", "`media` must be an array")]
     [Xunit.InlineData("{\"prompt\":\"a cat\",\"context\":{}}", "'context'")]
     [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":[]}", "must be an object")]
     [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":\"model\"}", "must be an object")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":{},\"media\":[]}", "only supported")]
     public async Task PromptEnhanceRun_MalformedBody_IsInvalidRequestBeforeAnySessionUse(string rawJson, string expected)
     {
         JObject rawInput = JObject.Parse(rawJson);
@@ -65,5 +68,13 @@ public class BackendClientTests
 
         Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains(expected, result["error"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public void ValidateRunBody_LegacyMediaWithoutSwarmInput_IsAccepted()
+    {
+        JObject result = WebAPI.BackendClient.ValidateRunBody(JObject.Parse("""{"prompt":"a cat","media":[{"type":"base64","data":"QUJD","mediaType":"image/png"}]}"""));
+
+        Xunit.Assert.Null(result);
     }
 }
