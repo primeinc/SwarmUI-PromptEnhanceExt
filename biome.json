@@ -11,7 +11,8 @@
             "!!**/obj",
             "!!**/out",
             "!!**/test-results",
-            "!!**/.claude"
+            "!!**/.claude",
+            "!!.claude"
         ]
     },
     "formatter": {
@@ -22,5 +23,33 @@
         "rules": {
             "preset": "recommended"
         }
-    }
+    },
+    "overrides": [
+        {
+            "includes": ["Frontend/**"],
+            "linter": {
+                "rules": {
+                    "correctness": {
+                        "noUnusedVariables": "off"
+                    },
+                    "style": {
+                        "useConst": "off"
+                    },
+                    "suspicious": {
+                        "noDoubleEquals": "off"
+                    }
+                }
+            }
+        },
+        {
+            "includes": ["Tests/**"],
+            "linter": {
+                "rules": {
+                    "style": {
+                        "noNonNullAssertion": "off"
+                    }
+                }
+            }
+        }
+    ]
 }

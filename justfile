@@ -45,8 +45,7 @@ frontend-test:
 vendor-sync:
     if ((Get-Item 'vendor' -Force -ErrorAction SilentlyContinue).LinkType -or (Get-Item 'vendor/SwarmUI' -Force -ErrorAction SilentlyContinue).LinkType) { Write-Error 'vendor or vendor/SwarmUI is a symlink/junction - refusing to touch it. Delete the link and re-run.'; exit 1 }
     if (-not (Test-Path 'vendor/SwarmUI/.git')) { git init -q vendor/SwarmUI; git -C vendor/SwarmUI remote add origin {{ swarmui_url }} }
-    git -C vendor/SwarmUI fetch --depth 1 origin {{ swarmui_pin }}
-    git -C vendor/SwarmUI checkout -q --detach {{ swarmui_pin }}
+    if ((git -C vendor/SwarmUI rev-parse -q --verify HEAD) -ne '{{ swarmui_pin }}') { git -C vendor/SwarmUI fetch --depth 1 origin {{ swarmui_pin }}; if ($LASTEXITCODE -ne 0) { exit 1 }; git -C vendor/SwarmUI checkout -q --detach {{ swarmui_pin }}; if ($LASTEXITCODE -ne 0) { exit 1 } }
     git -C vendor/SwarmUI rev-parse HEAD
 
 # Pin ./vendor/SwarmUI to the exact commit CI builds against (see the [windows] variant)
@@ -54,8 +53,7 @@ vendor-sync:
 vendor-sync:
     if [ -L vendor ] || [ -L vendor/SwarmUI ]; then echo 'vendor or vendor/SwarmUI is a symlink - refusing to touch it. Delete the link and re-run.' >&2; exit 1; fi
     if [ ! -e vendor/SwarmUI/.git ]; then git init -q vendor/SwarmUI && git -C vendor/SwarmUI remote add origin {{ swarmui_url }}; fi
-    git -C vendor/SwarmUI fetch --depth 1 origin {{ swarmui_pin }}
-    git -C vendor/SwarmUI checkout -q --detach {{ swarmui_pin }}
+    if [ "$(git -C vendor/SwarmUI rev-parse -q --verify HEAD)" != '{{ swarmui_pin }}' ]; then git -C vendor/SwarmUI fetch --depth 1 origin {{ swarmui_pin }} && git -C vendor/SwarmUI checkout -q --detach {{ swarmui_pin }}; fi
     git -C vendor/SwarmUI rev-parse HEAD
 
 # Make the vendored host a runnable dev install: seed Data/Settings.fds and copy this extension into the host's src/Extensions (a copy, never a junction).
@@ -159,25 +157,43 @@ backend-build:
 # global.json {"test":{"runner":"Microsoft.Testing.Platform"}} and retire the property; move
 # to the xunit.v3 4.x/MTP-v2 line when it leaves pre-release; drop the VSTest packages only
 # when every consuming runner speaks MTP (upstream guidance).
-backend-test:
-    dotnet test {{ backend_test_project }} -c Debug -v minimal --nologo
+backend-test: backend-test-build
+    dotnet test {{ backend_test_project }} -c Debug -v minimal --nologo --no-build
 
 # Run backend C# tests (path B: MTP through dotnet test, .NET 8/9 SDK mechanism)
-backend-test-mtp:
-    dotnet test {{ backend_test_project }} -c Debug -v minimal --nologo -p:TestingPlatformDotnetTestSupport=true
+backend-test-mtp: backend-test-build
+    dotnet test {{ backend_test_project }} -c Debug -v minimal --nologo --no-build -p:TestingPlatformDotnetTestSupport=true
 
 # Run backend C# tests (path C: the stand-alone MTP executable)
-backend-test-exe:
-    dotnet run --project {{ backend_test_project }} -c Debug
+backend-test-exe: backend-test-build
+    dotnet run --project {{ backend_test_project }} -c Debug --no-build
+
+# TestingPlatformDotnetTestSupport changes how `dotnet test` launches the tests, not what is
+# compiled (the outputs are byte-identical with and without it), so the three paths share one build.
+# Build the C# test project and what it references; the three runner paths share this build
+backend-test-build:
+    dotnet build {{ backend_test_project }} -c Debug -v minimal --nologo
 
 # Build everything
 build: frontend-build backend-build
 
-# Run all tests
-test: frontend-test backend-test backend-test-mtp backend-test-exe
+# Run all tests: the jsdom suite alongside the C# suite
+[parallel]
+test: frontend-test backend-tests
 
-# Validation gate used before commit
-check: frontend-parity lint readme-shots-check test
+# The C# suite through all three runner paths: one shared build, then the paths side by side (they only read the build output)
+backend-tests: backend-test-build backend-test-paths
+
+# The three C# runner paths at once; `backend-tests` builds first
+[parallel]
+backend-test-paths: backend-test backend-test-mtp backend-test-exe
+
+# Validation gate used before commit. Parity runs first because it rewrites Assets/*.js; every gate after it only reads the tree, so they run in parallel.
+check: frontend-parity check-readonly-gates
+
+# The gates of `check` that only read the tree
+[parallel]
+check-readonly-gates: lint readme-shots-check test
 
 # Full setup + validation for a fresh clone
 dev: install check

@@ -7,7 +7,7 @@
  *   current  exits 0 when a green browser run already covers the current inputs, else 1 with the reason
  *
  * The README screenshots are Playwright toHaveScreenshot baselines (playwright.config.ts): a run
- * compares them pixel-wise with a small tolerance, and `just ui-test-force` runs with
+ * compares them pixel-wise with no differing pixel allowed, and `just ui-test-force` runs with
  * --update-snapshots=changed, so Playwright rewrites a baseline only when the picture really
  * changed. `just ui-test` runs `current` and stops there when nothing changed; otherwise it runs
  * clean, the full browser gate, then write. `write` refuses unless that same run passed in full

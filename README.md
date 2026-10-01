@@ -195,21 +195,25 @@ Two layouts build and test identically; the C# project picks one automatically (
 
 ### Gates
 
-`just check` is the gate to run before committing. It runs, in order:
+`just check` is the gate to run before committing. It runs the frontend parity check first, since it rewrites `Assets/*.js`, then everything else in parallel. The three C# runner paths share one build:
 
 ```sh
 npm run check:frontend-parity   # Frontend/*.ts is authoritative; committed Assets/*.js must be its exact tsc output
-npm run lint                    # Biome, recommended preset, no rule overrides; every diagnostic fails (--error-on-warnings)
+# then, in parallel:
+npm run lint                    # Biome, recommended preset; Frontend keeps SwarmUI style (let, ==)
 npm run shots:check             # ./screenshots must be what a green browser run of the current UI produced
 npm run test:frontend           # compiled TypeScript tests against the emitted Assets/*.js and the host util.js, real jsdom
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
-dotnet test Tests/PromptEnhance.Tests.csproj -c Debug -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
-dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug   # C# suite, stand-alone MTP test executable
+dotnet build Tests/PromptEnhance.Tests.csproj -c Debug   # one build for the three C# runner paths, which then run in parallel:
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, VSTest path (zero-test runs fail via Tests/.runsettings)
+dotnet test Tests/PromptEnhance.Tests.csproj -c Debug --no-build -p:TestingPlatformDotnetTestSupport=true   # C# suite, Microsoft Testing Platform via dotnet test
+dotnet run --project Tests/PromptEnhance.Tests.csproj -c Debug --no-build   # C# suite, stand-alone MTP test executable
 ```
+
+Parallel output is interleaved; `just` names the recipe that failed on its last line.
 
 The parity check diffs against the git index, so stage the rebuilt `Assets/*.js` before running it.
 
-CI (`.github/workflows/gates.yml`) runs these gates on every push, the C# suite in both layouts, plus a `browser` job: the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
+CI (`.github/workflows/gates.yml`) runs two jobs on every push that touches more than `docs/` or `LICENSE`. The `gates` job runs `just check`, type-checks the browser specs, and runs the C# suite through all three runner paths again in the host layout. The `browser` job runs the live host boot (`just vendor-ci-test`) and every browser gate. The browser job skips the pixel comparison of `screenshots/`, since fonts render differently on the Linux runners; `shots:check` still holds the screenshots to the current inputs there.
 
 ### Running the real host
 
@@ -233,7 +237,7 @@ The browser gates cover:
 
 ### README screenshots
 
-The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. Every browser run compares them pixel by pixel, with a small tolerance for antialiasing. `just ui-test-force` runs with `--update-snapshots=changed`, so Playwright rewrites a PNG only when the picture really changed. An unchanged UI leaves `screenshots/` untouched.
+The PNGs in `screenshots/` are Playwright `toHaveScreenshot` baselines. On the default ports a browser run compares them pixel by pixel with no differing pixel allowed, so a single changed character is a difference. Other ports skip the comparison, since the settings modal shows the port values. A plain `npm run test:ui` fails on a difference. `just ui-test` and `just ui-test-force` run with `--update-snapshots=changed`, which rewrites the differing PNG instead of failing, so a visual change shows up in `git diff screenshots/` for review. An unchanged UI leaves `screenshots/` untouched.
 
 `screenshots/manifest.json` records:
 - each screenshot's sha256
@@ -244,6 +248,8 @@ Only the gate writes it, and only after a run that passed in full, unfiltered, o
 - a screenshot differs from the one recorded, or is added or missing
 - any input or the pin changed since that run
 - the README does not show a recorded screenshot
+
+The manifest guards against committing stale screenshots by accident. It is not tamper-proof.
 
 The fix is always `just ui-test`, then commit `screenshots/`. Removing a screenshot from the specs does not delete its PNG; delete it and the README reference in the same change.
 
