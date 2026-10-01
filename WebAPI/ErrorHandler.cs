@@ -16,6 +16,7 @@ public enum PromptEnhanceErrorCategory
     InvalidResponseShape,
     HttpError,
     Authentication,
+    InvalidRequest,
     Generic
 }
 
@@ -33,6 +34,7 @@ public static class ErrorHandler
         PromptEnhanceErrorCategory.InvalidResponseShape => "invalid_response_shape",
         PromptEnhanceErrorCategory.HttpError => "http_error",
         PromptEnhanceErrorCategory.Authentication => "authentication",
+        PromptEnhanceErrorCategory.InvalidRequest => "invalid_request",
         _ => "generic"
     };
 
@@ -50,13 +52,15 @@ public static class ErrorHandler
             PromptEnhanceErrorCategory.ModelMissing =>
                 "No usable model. Pick a model in PromptEnhance settings, and confirm the backend has it loaded.",
             PromptEnhanceErrorCategory.UnsupportedImage =>
-                "The selected model rejected the attached image. Use a vision-capable model, or turn off 'Send selected image' for this enhance.",
+                "The selected model rejected the attached images. Use a vision-capable model, or turn off 'Send Prompt Images' and set 'Past Generations to Include' to 0.",
             PromptEnhanceErrorCategory.InvalidResponseShape =>
                 "The backend returned a response that was not valid OpenAI-style chat JSON. Confirm the Base URL points at an OpenAI-compatible server.",
             PromptEnhanceErrorCategory.HttpError =>
                 "The LLM backend returned an error response.",
             PromptEnhanceErrorCategory.Authentication =>
                 "The LLM backend rejected the request as unauthorized. Set or correct its API key under User → API Keys → PromptEnhance LLM Server.",
+            PromptEnhanceErrorCategory.InvalidRequest =>
+                "The enhance request was malformed.",
             _ => "Something went wrong talking to the LLM backend."
         };
         return string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage}\n\nDetail: {Excerpt(detail)}";

@@ -41,14 +41,40 @@ public class BackendClientTests
     [Xunit.InlineData("{}")]
     [Xunit.InlineData("{\"prompt\":\"\"}")]
     [Xunit.InlineData("{\"prompt\":\"   \"}")]
-    public async Task PromptEnhanceRun_EmptyPrompt_ReturnsClassifiedErrorBeforeAnySessionUse(string rawJson)
+    public async Task PromptEnhanceRun_EmptyPrompt_IsInvalidRequestBeforeAnySessionUse(string rawJson)
     {
         JObject rawInput = JObject.Parse(rawJson);
 
-        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(rawInput, null!);
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, rawInput);
 
         Xunit.Assert.False(result["success"]!.Value<bool>());
-        Xunit.Assert.Equal("generic", result["error_id"]!.Value<string>());
+        Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
         Xunit.Assert.Contains("No prompt text", result["error"]!.Value<string>());
+    }
+
+    [Xunit.Theory]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":\"image\"}", "`media` must be an array")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":[{}]}", "`media` must be an array")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"media\":[{\"type\":\"base64\",\"data\":\"QUJD\",\"mediaType\":\"text/plain\"}]}", "`media` must be an array")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"context\":{}}", "'context'")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":[]}", "must be an object")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":\"model\"}", "must be an object")]
+    [Xunit.InlineData("{\"prompt\":\"a cat\",\"swarmInput\":{},\"media\":[]}", "only supported")]
+    public async Task PromptEnhanceRun_MalformedBody_IsInvalidRequestBeforeAnySessionUse(string rawJson, string expected)
+    {
+        JObject rawInput = JObject.Parse(rawJson);
+
+        JObject result = await WebAPI.BackendClient.PromptEnhanceRun(null!, rawInput);
+
+        Xunit.Assert.Equal("invalid_request", result["error_id"]!.Value<string>());
+        Xunit.Assert.Contains(expected, result["error"]!.Value<string>());
+    }
+
+    [Xunit.Fact]
+    public void ValidateRunBody_LegacyMediaWithoutSwarmInput_IsAccepted()
+    {
+        JObject result = WebAPI.BackendClient.ValidateRunBody(JObject.Parse("""{"prompt":"a cat","media":[{"type":"base64","data":"QUJD","mediaType":"image/png"}]}"""));
+
+        Xunit.Assert.Null(result);
     }
 }

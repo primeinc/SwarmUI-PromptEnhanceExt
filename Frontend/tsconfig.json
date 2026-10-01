@@ -3,11 +3,22 @@
         "target": "es2022",
         "lib": ["es2022", "dom", "dom.iterable"],
         "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "forceConsistentCasingInFileNames": true,
         "noEmitOnError": true,
         "removeComments": false,
         "newLine": "lf",
         "outDir": "../Assets",
         "types": []
     },
-    "files": ["swarm.d.ts", "contracts.ts", "settings.ts", "promptenhance.ts"]
+    "files": ["swarm.d.ts", "globals.d.ts", "contracts.ts", "settings.ts", "swarminput.ts", "promptenhance.ts"]
 }

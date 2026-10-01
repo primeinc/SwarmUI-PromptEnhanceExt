@@ -1,11 +1,11 @@
 {
-  "inputs": "32774f65ed2b676253575c66c2c48d9d99bc87529d4bc4381489c33464d6715c",
+  "inputs": "dbb5817f633d9ae6e60d777b209bee86abe687e5571975e653190fe2567c9846",
   "swarmuiPin": "96a4c3d14a31776bab5e3300301e078c15875f22",
   "shots": {
-    "api-key-row.png": "5d478ed4d0570c0ec959022a36fc61a8f5f18759bee789286b00765536c31260",
-    "enhance-button.png": "bc22563599baa891b62c43faec6f30c1f127a680df49f3a70944effe225657e5",
-    "enhance-preview.png": "c707ec55229845253cb5ddee2e8742ccb2d2c2db44e905232261909738a9e5d2",
-    "enhance-restore.png": "0adf9d935bb60d7f9fa3c238f619de8ddaf16df046ccc28b65f7e068ef3bde9a",
-    "settings-modal.png": "3fac85826f28e6391c687cf5b8491d6536f07802b8b38a4aa71a8b3b0dd6deb9"
+    "api-key-row.png": "5b583eaa9c3e1271a91b28f6d91f4aa56eafc920c165db607a2ee00e674745b6",
+    "enhance-button.png": "a8cbc70c3e756b160eaa7a890d8c17d9d2f56893b1efee9b1769c3a8f5a6c786",
+    "enhance-preview.png": "2b1fd62b86a98b11b8914bda2791edf25f3c9cce1aab3393ec28fe12be20776d",
+    "enhance-restore.png": "62c06274264cada987ffdfbfdd0b4e796c749d67695384f8583e236e809b00ff",
+    "settings-modal.png": "733550b6568b0296cb4808c133dd6ddc07b179a49f19c86656757e03a27f83ba"
   }
 }

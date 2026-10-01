@@ -8,10 +8,14 @@ const passedPath = path.join(__dirname, 'shots', 'run', 'passed.json');
 /** True when the command line runs every spec: only a config flag and snapshot updating, no file filters, --grep, or other selection. */
 function isFullRun(): boolean {
     const args = process.argv.slice(process.argv.indexOf('test') + 1);
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i]!;
+    let configValueNext = false;
+    for (const arg of args) {
+        if (configValueNext) {
+            configValueNext = false;
+            continue;
+        }
         if (arg === '-c' || arg === '--config') {
-            i++;
+            configValueNext = true;
             continue;
         }
         if (arg.startsWith('--config=') || arg.startsWith('--update-snapshots')) {
@@ -30,12 +34,13 @@ export default class GreenRunReporter implements Reporter {
             return;
         }
         fs.mkdirSync(path.dirname(passedPath), { recursive: true });
+        const { PE_UI_PORT, PE_FAKE_BACKEND_PORT, PE_FAKE_KEYED_BACKEND_PORT } = process.env;
         fs.writeFileSync(passedPath, `${JSON.stringify({
             status: result.status,
             ports: {
-                ui: process.env.PE_UI_PORT ?? null,
-                fakeBackend: process.env.PE_FAKE_BACKEND_PORT ?? null,
-                fakeKeyedBackend: process.env.PE_FAKE_KEYED_BACKEND_PORT ?? null,
+                ui: PE_UI_PORT ?? null,
+                fakeBackend: PE_FAKE_BACKEND_PORT ?? null,
+                fakeKeyedBackend: PE_FAKE_KEYED_BACKEND_PORT ?? null,
             },
         }, null, 2)}\n`);
     }

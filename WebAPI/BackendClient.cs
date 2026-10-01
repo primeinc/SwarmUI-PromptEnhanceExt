@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -281,70 +282,188 @@ public class BackendClient
         }
     }
 
+    /// <summary>The top-level keys a PromptEnhanceRun body may carry.</summary>
+    private static readonly HashSet<string> RunBodyKeys = ["prompt", "swarmInput", "media"];
+
+    private static bool IsLegacyMediaEntry(JToken entry)
+    {
+        if (entry is not JObject media
+            || !media.TryGetValue("type", out JToken type)
+            || type.Type != JTokenType.String
+            || type.Value<string>() != "base64"
+            || !media.TryGetValue("data", out JToken data)
+            || data.Type != JTokenType.String
+            || string.IsNullOrWhiteSpace(data.Value<string>())
+            || !media.TryGetValue("mediaType", out JToken mediaType)
+            || mediaType.Type != JTokenType.String
+            || !MediaTypeHeaderValue.TryParse(mediaType.Value<string>(), out MediaTypeHeaderValue parsedMediaType)
+            || !parsedMediaType.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            || parsedMediaType.Parameters.Count > 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Checks the body shape before any session or settings access: `prompt` is a non-blank string, `swarmInput` (optional) is an object, and the legacy `media` array is accepted only without `swarmInput`. Returns null when valid, else an invalid_request error.</summary>
+    public static JObject ValidateRunBody(JObject raw)
+    {
+        if (raw == null || !raw.TryGetValue("prompt", out JToken prompt) || prompt.Type != JTokenType.String || string.IsNullOrWhiteSpace(prompt.Value<string>()))
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "No prompt text was provided to enhance: `prompt` must be a non-blank string.");
+        }
+        foreach (JProperty property in raw.Properties())
+        {
+            if (!RunBodyKeys.Contains(property.Name))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, $"'{property.Name}' is not a PromptEnhanceRun field. The body holds `prompt` and optionally `swarmInput` or legacy `media`.");
+            }
+        }
+        if (raw.TryGetValue("swarmInput", out JToken swarmInput) && swarmInput is not JObject)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`swarmInput` must be an object.");
+        }
+        if (raw.TryGetValue("media", out JToken legacyMedia))
+        {
+            if (raw.ContainsKey("swarmInput"))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`media` is only supported when `swarmInput` is omitted.");
+            }
+            if (legacyMedia is not JArray mediaEntries || mediaEntries.Any(entry => !IsLegacyMediaEntry(entry)))
+            {
+                return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, "`media` must be an array of { type: 'base64', data: <base64 image bytes>, mediaType: <image MIME type> } objects.");
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Adds images from the legacy `media` request field to the multimodal context.</summary>
+    private static void AddLegacyMedia(JArray mediaEntries, BackendSchema.PromptContext context)
+    {
+        for (int i = 0; i < mediaEntries.Count; i++)
+        {
+            JObject media = (JObject)mediaEntries[i]!;
+            context.PromptImages.Add(new BackendSchema.MediaContent
+            {
+                Data = media["data"]!.Value<string>(),
+                MediaType = media["mediaType"]!.Value<string>(),
+                Label = $"Image {i + 1}"
+            });
+        }
+    }
+
+    /// <summary>Builds the request-supplied part of the enhance context from the user's settings: Prompt Images and the active model stack from <paramref name="swarmInput"/> through <see cref="SwarmContext.Resolve"/>. Throws <see cref="ArgumentException"/> for malformed input.
+    /// Past Generations are added later by <see cref="AddPastGenerations"/>, once the cheap failure checks have passed.</summary>
+    public static BackendSchema.PromptContext BuildContext(Session session, JObject settings, JObject swarmInput)
+    {
+        bool sendPromptImages = settings["sendPromptImages"].Value<bool>();
+        bool sendActiveModelContext = settings["sendActiveModelContext"].Value<bool>();
+        BackendSchema.PromptContext context = new();
+        if (swarmInput == null)
+        {
+            if (sendPromptImages || sendActiveModelContext)
+            {
+                throw new ArgumentException("`swarmInput` is required while Send Prompt Images or Send Active Model Context is on.");
+            }
+        }
+        else
+        {
+            SwarmContext.Resolve(session, swarmInput, sendPromptImages, sendActiveModelContext, context);
+        }
+        return context;
+    }
+
+    /// <summary>Adds the user's newest Past Generations to <paramref name="context"/> when the setting is above 0.</summary>
+    public static void AddPastGenerations(Session session, JObject settings, BackendSchema.PromptContext context)
+    {
+        int pastGenerations = settings["pastGenerations"].Value<int>();
+        if (pastGenerations > 0)
+        {
+            context.PastGenerations = GenerationHistory.Recent(session.User.UserID, pastGenerations);
+        }
+    }
+
     /// <summary>API route: the enhance call.</summary>
-    [API.APIDescription("Sends a prompt, and optionally images, to the configured backend's `POST /v1/chat/completions` with the user's system prompt and sampling settings, and returns the rewritten prompt. Sends the user's PromptEnhance API key, if set.",
+    [API.APIDescription("Sends a prompt, with the context channels enabled in the user's settings, to the configured backend's `POST /v1/chat/completions` with the user's system prompt and sampling settings, and returns the rewritten prompt. Sends the user's PromptEnhance API key, if set.",
         """
             "success": true,
             "response": "A weathered stone lighthouse on a rocky headland at dusk, ..."
             // on failure: "success": false, "error": "The request to the LLM backend timed out ...", "error_id": "timeout"
-            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, generic
+            // error_id is one of: server_unavailable, timeout, invalid_base_url, model_missing, unsupported_image, invalid_response_shape, http_error, authentication, invalid_request, generic
         """)]
-    public static async Task<JObject> PromptEnhanceRun(
-        [API.APIParameter("The request body: `prompt` (string, required, the text to enhance) and optional `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: 'image/png' or similar } sent to the model as images.")] JObject raw,
-        Session session)
+    public static async Task<JObject> PromptEnhanceRun(Session session,
+        [API.APIParameter("The request body: `prompt`, the non-blank prompt text to enhance; optionally `swarmInput`, SwarmUI generation input for enabled context channels; or legacy `media`, an array of { type: 'base64', data: <base64 image bytes>, mediaType: <image MIME type> } objects accepted only when `swarmInput` is omitted. `promptimages` while Send Prompt Images is on; `model`, `loras`, `loraweights`, `loratencweights`, `lorasectionconfinement` while Send Active Model Context is on. `swarmInput` is required while either is on. Past Generations come from the server-side history.")] JObject raw)
     {
-        string userText = raw?["prompt"]?.ToString();
-        if (string.IsNullOrWhiteSpace(userText))
+        JObject bodyError = ValidateRunBody(raw);
+        if (bodyError != null)
         {
-            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "No prompt text was provided to enhance.");
+            return bodyError;
         }
+        string prompt = raw["prompt"].Value<string>();
         JObject error = null;
         (JObject settings, string normalizedBase, string apiKey) = await ResolveConfig(session, e => error = e);
         if (error != null)
         {
             return error;
         }
-        string model = settings["model"]?.ToString();
+        BackendSchema.PromptContext context;
+        try
+        {
+            context = BuildContext(session, settings, raw["swarmInput"] as JObject);
+            if (raw["media"] is JArray legacyMedia)
+            {
+                AddLegacyMedia(legacyMedia, context);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.InvalidRequest, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"[PromptEnhance] Could not build the enhance context: {ex}");
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, ex.Message);
+        }
+        string model = settings["model"].Value<string>();
         if (string.IsNullOrWhiteSpace(model))
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ModelMissing);
+        }
+        if (settings["pastGenerations"].Value<int>() > 0 && !GenerationHistory.IsOpen)
+        {
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, "Past Generations is unavailable: the generation history store did not open on this server (see the server log). Set Past Generations to Include to 0 to enhance without it.");
         }
         if (!await IsReachable(normalizedBase))
         {
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.ServerUnavailable);
         }
-        string systemPrompt = settings["systemPrompt"]?.ToString();
-        double temperature = settings["temperature"]?.Value<double?>() ?? 0.7;
-        int maxTokens = settings["maxTokens"]?.Value<int?>() ?? 1024;
-        int timeoutSec = ResolveTimeoutSeconds(settings);
-        List<BackendSchema.MediaContent> media;
         try
         {
-            media = ParseMedia(raw?["media"] as JArray);
+            AddPastGenerations(session, settings, context);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex)
         {
-            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.UnsupportedImage, ex.Message);
+            Logs.Error($"[PromptEnhance] Could not read the Past Generations history: {ex}");
+            return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, ex.Message);
         }
-        return await ExecuteChat(normalizedBase, model, systemPrompt, userText, media, temperature, maxTokens, timeoutSec, apiKey);
+        return await ExecuteChat(normalizedBase, model, settings["systemPrompt"].Value<string>(), prompt, context, settings["temperature"].Value<double>(), settings["maxTokens"].Value<int>(), ResolveTimeoutSeconds(settings), apiKey);
     }
 
-    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried media is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
-    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, List<BackendSchema.MediaContent> media, double temperature, int maxTokens, int timeoutSec, string apiKey = null)
+    /// <summary>The raw `POST /v1/chat/completions` round-trip, sending `apiKey` as a bearer token when given. A 400 on a request that carried images is reclassified as UnsupportedImage when <see cref="ErrorHandler.LooksLikeImageRejection"/> matches the body.</summary>
+    public static async Task<JObject> ExecuteChat(string normalizedBase, string model, string systemPrompt, string userText, BackendSchema.PromptContext context, double temperature, int maxTokens, int timeoutSec, string apiKey = null)
     {
         if (apiKey != null && !UpstreamApiKey.IsSendable(apiKey))
         {
             return UnsendableKeyError();
         }
-        object requestBody = BackendSchema.BuildChatRequest(model, systemPrompt, userText, media, temperature, maxTokens);
-        string json = JsonSerializer.Serialize(requestBody);
+        bool hasImages = context.HasImages;
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(BackendSchema.BuildChatRequest(model, systemPrompt, userText, temperature, maxTokens, context));
         try
         {
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(timeoutSec));
-            using HttpRequestMessage request = new(HttpMethod.Post, ChatUrl(normalizedBase))
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            };
+            ByteArrayContent requestContent = new(json);
+            requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            using HttpRequestMessage request = new(HttpMethod.Post, ChatUrl(normalizedBase)) { Content = requestContent };
             UpstreamApiKey.Apply(request, apiKey);
             HttpResponseMessage response = await HttpClient.SendAsync(request, cts.Token);
             string body = await response.Content.ReadAsStringAsync();
@@ -355,7 +474,7 @@ public class BackendClient
             }
             if (!response.IsSuccessStatusCode)
             {
-                PromptEnhanceErrorCategory category = media is { Count: > 0 } && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
+                PromptEnhanceErrorCategory category = hasImages && response.StatusCode == HttpStatusCode.BadRequest && ErrorHandler.LooksLikeImageRejection(body)
                     ? PromptEnhanceErrorCategory.UnsupportedImage
                     : ErrorHandler.CategorizeHttpStatus(response.StatusCode);
                 return PromptEnhanceAPI.CreateErrorResponse(category, PromptEnhanceAPI.ExtractErrorMessage(body));
@@ -380,30 +499,5 @@ public class BackendClient
             Logs.Error($"[PromptEnhance] Unexpected error during enhance: {ex.Message}");
             return PromptEnhanceAPI.CreateErrorResponse(PromptEnhanceErrorCategory.Generic, ex.Message);
         }
-    }
-
-    /// <summary>Parses the request's media array. A present-but-dataless entry throws ArgumentException.</summary>
-    public static List<BackendSchema.MediaContent> ParseMedia(JArray media)
-    {
-        List<BackendSchema.MediaContent> result = [];
-        if (media == null)
-        {
-            return result;
-        }
-        foreach (JToken item in media)
-        {
-            string data = item["data"]?.ToString();
-            if (string.IsNullOrWhiteSpace(data))
-            {
-                throw new ArgumentException("A media entry was attached but carried no image data.");
-            }
-            result.Add(new BackendSchema.MediaContent
-            {
-                Type = item["type"]?.ToString() ?? "base64",
-                Data = data,
-                MediaType = item["mediaType"]?.ToString()
-            });
-        }
-        return result;
     }
 }

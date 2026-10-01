@@ -1,6 +1,6 @@
 /**
  * Generate-tab integration for the PromptEnhance extension: the Enhance bar, the preview panel,
- * the image-context adapter, and the prompt-mutation policy (preview / append / replace-with-restore).
+ * the enhance round-trip, and the prompt-mutation policy (preview / append / replace-with-restore).
  *
  * AUTHORITATIVE SOURCE: Frontend/promptenhance.ts. The committed Assets/promptenhance.js is tsc
  * build output — do not hand-edit it.
@@ -33,7 +33,7 @@ class PromptEnhanceGenTab {
 
     /** Writes the prompt textarea and notifies SwarmUI of the change. */
     setPrompt(text: string): void {
-        let box = this.promptBox();
+        const box = this.promptBox();
         box.value = text;
         triggerChangeFor(box);
         box.focus();
@@ -41,7 +41,7 @@ class PromptEnhanceGenTab {
 
     /** Shows or clears the in-flight state on the Enhance button. */
     setLoading(on: boolean): void {
-        let button = getRequiredElementById('pe_enhance_btn') as HTMLButtonElement;
+        const button = getRequiredElementById('pe_enhance_btn') as HTMLButtonElement;
         button.disabled = on;
         getRequiredElementById('pe_enhance_loading').style.display = on ? 'inline-flex' : 'none';
     }
@@ -63,29 +63,6 @@ class PromptEnhanceGenTab {
         genTabLayout.altPromptSizeHandle();
     }
 
-    /** Reads the currently selected Generate-tab image into a base64 part through SwarmUI's imageToData. Returns null when no image is selected; throws when an image exists but does not read as an image. */
-    getSelectedImage(): Promise<PEImagePart | null> {
-        let img = document.querySelector<HTMLImageElement>('#current_image img.current-image-img')
-            || document.querySelector<HTMLImageElement>('#current_image img');
-        let src = img?.getAttribute('src');
-        if (!src) {
-            return Promise.resolve(null);
-        }
-        return new Promise((resolve, reject) => {
-            imageToData(src, (dataUrl) => {
-                let text = dataUrl ?? '';
-                let comma = text.indexOf(',');
-                let header = comma > 0 ? text.substring(0, comma) : '';
-                let data = comma > 0 ? text.substring(comma + 1) : '';
-                if (!header.startsWith('data:image/') || !header.endsWith(';base64') || !data) {
-                    reject(new Error('Could not attach the selected image: it did not load as an image.'));
-                    return;
-                }
-                resolve({ data: data, mediaType: header.substring('data:'.length, header.length - ';base64'.length) });
-            });
-        });
-    }
-
     /** One PromptEnhanceRun round-trip, normalized to a PEEnhanceResult. Transport failures resolve, never reject. */
     enhanceRequest(payload: PEEnhancePayload): Promise<PEEnhanceResult> {
         return new Promise((resolve) => {
@@ -98,14 +75,14 @@ class PromptEnhanceGenTab {
 
     /** Prompt-mutation policy: preview shows an Apply/Cancel panel; append keeps the original inline; replace_with_restore swaps the prompt and stashes the original for Restore. */
     applyEnhancement(original: string, enhanced: string): void {
-        let mode = promptEnhanceSettings.effective().replaceMode;
-        if (mode == 'append') {
+        const mode = promptEnhanceSettings.effective().replaceMode;
+        if (mode === 'append') {
             this.setPrompt(`${original.trimEnd()}\n\n---\n\n${enhanced}`);
             this.hideRestore();
             return;
         }
-        if (mode == 'replace_with_restore') {
-            if (this.lastOriginal == null) {
+        if (mode === 'replace_with_restore') {
+            if (this.lastOriginal === null) {
                 this.lastOriginal = original;
             }
             this.setPrompt(enhanced);
@@ -145,7 +122,7 @@ class PromptEnhanceGenTab {
     /** Applies the pending preview result, stashing the original for Restore. */
     applyPreview(): void {
         if (this.pending) {
-            if (this.lastOriginal == null) {
+            if (this.lastOriginal === null) {
                 this.lastOriginal = this.pending.original;
             }
             this.setPrompt(this.pending.enhanced);
@@ -156,19 +133,19 @@ class PromptEnhanceGenTab {
 
     /** Puts the stashed original prompt back. */
     restore(): void {
-        if (this.lastOriginal != null) {
+        if (this.lastOriginal !== null) {
             this.setPrompt(this.lastOriginal);
             this.lastOriginal = null;
         }
         this.hideRestore();
     }
 
-    /** The Enhance click flow: validate input, optionally attach the selected image, run the backend round-trip, apply the result. Re-entry is guarded; the loading state clears on every path. */
+    /** The Enhance click flow: validate input, collect the SwarmUI input the enabled context channels need, run the backend round-trip, apply the result. Re-entry is guarded; the loading state clears on every path. */
     async handleEnhance(): Promise<void> {
         if (this.enhancing) {
             return;
         }
-        let original = this.promptBox().value;
+        const original = this.promptBox().value;
         if (!original.trim()) {
             this.showError('Type a prompt to enhance first.');
             return;
@@ -177,14 +154,9 @@ class PromptEnhanceGenTab {
         this.setLoading(true);
         this.hidePreview();
         try {
-            let payload: PEEnhancePayload = { prompt: original.trim() };
-            if (promptEnhanceSettings.effective().sendSelectedImage) {
-                let image = await this.getSelectedImage();
-                if (image) {
-                    payload.media = [{ type: 'base64', data: image.data, mediaType: image.mediaType }];
-                }
-            }
-            let result = await this.enhanceRequest(payload);
+            const swarmInput = promptEnhanceSwarmInput.collect(promptEnhanceSettings.effective());
+            const payload: PEEnhancePayload = swarmInput ? { prompt: original.trim(), swarmInput } : { prompt: original.trim() };
+            const result = await this.enhanceRequest(payload);
             if (result.ok) {
                 this.applyEnhancement(original, result.response);
             }
@@ -209,7 +181,7 @@ class PromptEnhanceGenTab {
         if (this.bar) {
             return;
         }
-        let area = getRequiredElementById('alt_prompt_extra_area');
+        const area = getRequiredElementById('alt_prompt_extra_area');
         this.bar = createDiv('pe_button_bar', 'pe-button-bar', `
             <button type="button" class="basic-button pe-enhance-btn" id="pe_enhance_btn">Enhance Prompt</button>
             <button type="button" class="basic-button" id="pe_settings_button" title="PromptEnhance Settings">&#x2699;&#xFE0F;</button>
@@ -241,7 +213,7 @@ class PromptEnhanceGenTab {
 }
 
 /** Shared Generate-tab integration. */
-let promptEnhanceGenTab = new PromptEnhanceGenTab();
+const promptEnhanceGenTab = new PromptEnhanceGenTab();
 
 sessionReadyCallbacks.push(() => {
     if (!promptEnhanceGenTab.ready) {

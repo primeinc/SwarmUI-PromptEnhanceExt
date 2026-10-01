@@ -1,6 +1,6 @@
 # PromptEnhance
 
-A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt (and optionally the selected image) to an OpenAI-compatible chat server you configure, such as Ollama, LM Studio, or llama.cpp's server. The server rewrites the prompt into a more detailed one, and the result is shown for approval, appended, or swapped in with a Restore button.
+A [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) extension that adds an **Enhance Prompt** button to the Generate tab. Clicking it sends the current prompt to an OpenAI-compatible chat server you configure, such as Ollama, LM Studio, or llama.cpp's server. Optional context can include the ordered SwarmUI Prompt Images, recent generation attempts with their output images, and the active base-model/LoRA stack. The server rewrites the prompt into a more detailed one, and the result is shown for approval, appended, or swapped in with a Restore button.
 
 ![The Enhance Prompt button and settings gear above the Generate-tab prompt box](screenshots/enhance-button.png)
 
@@ -43,7 +43,28 @@ After a replace (whether from **Apply** in Preview mode or from Replace mode), a
 
 The screenshots come from the extension's browser tests, which run it against a stub server that answers `ENHANCED: <your prompt>`. A real model returns a rewritten prompt.
 
-**Send Selected Image** attaches the image currently selected on the Generate tab to the request, which needs a vision-capable model. With no image selected, the request is text-only.
+PromptEnhance has three independent context controls:
+
+- **Send Prompt Images** sends the Generate tab's Prompt Images in order, the same `promptimages` SwarmUI itself would send. The enhancer sees them as **Image 1**, **Image 2**, and so on.
+- **Past Generations to Include** sends your last N finished generation requests, oldest to newest. Each output image carries the prompt SwarmUI generated it from (after wildcards and `<random:…>` are resolved) and the raw metadata SwarmUI saved in the output file. `0` disables it and deletes your history. See [Generation history](#generation-history).
+- **Send Active Model Context** sends the selected base model and each active LoRA as SwarmUI's model registry describes them (title, class, trigger phrase, usage hint, description, tags), with each LoRA's model weight, text-encoder weight, and section scope as SwarmUI will apply them.
+
+Current Prompt Images and past-generation outputs use separate namespaces, so **Image 1** never means a historical output. Nothing requested is dropped. Each of these fails the enhance with an `invalid_request` error that names the problem:
+- an attached Prompt Image that is empty or whose bytes are not an image (the type sent is read from the bytes, not the label)
+- a LoRA SwarmUI does not know
+- a model your role may not use
+- a malformed weight or section scope
+- more weights or scopes than LoRAs
+
+### Generation history
+
+Past Generations come from a per-user history the server keeps in `Data/PromptEnhance/history.ldb` (under SwarmUI's data directory). It survives page reloads and server restarts.
+- A request is recorded only when SwarmUI saves files for you, the request is not **Do Not Save**, and your **Past Generations to Include** is above `0` when the request finishes.
+- Only still-image outputs that SwarmUI saved are recorded: the first 4 of each request, each as a JPEG copy at most 1024 pixels on its longest edge, with its resolved prompt and the metadata SwarmUI saved in the file. With SwarmUI's **Save Metadata** off, no metadata is recorded or sent.
+- Recording happens on a background worker after SwarmUI finishes the request, so it never delays generation.
+- The newest 10 requests per user are kept; older ones are deleted as new ones arrive.
+- Saving **Past Generations to Include** as `0`, or resetting the settings, deletes your history. Deleting an image from SwarmUI's output history does not remove its copy here.
+- If the history file cannot be opened at startup, the server log shows the error and saving **Past Generations to Include** above `0` is refused.
 
 Settings are saved per user, on the server. Each field in the settings modal has a **?** popover describing it.
 
@@ -61,7 +82,7 @@ Errors from **Enhance Prompt** appear in SwarmUI's error banner. Errors in the s
 | `Base URL must be a valid http(s) URL…` | Save rejected the Base URL; use an absolute URL such as `http://localhost:11434`. |
 | `The LLM backend rejected the request as unauthorized…` | The server needs an API key, or the saved one is wrong. Set it under **User → API Keys**; see [API keys](#api-keys). The server's own reason follows under **Detail**. |
 | `The saved PromptEnhance API key contains spaces, line breaks, or non-ASCII characters…` | Re-enter the key under **User → API Keys**; a stray character was likely pasted with it. It was not sent. |
-| `The selected model rejected the attached image…` | Use a vision model, or turn off **Send Selected Image**. |
+| `The selected model rejected the attached image…` | Use a vision model, or disable **Send Prompt Images** and set **Past Generations to Include** to `0`. |
 | `The request to the LLM backend timed out…` | Raise **Timeout (s)**, or use a faster model. |
 
 ## Permissions
@@ -83,7 +104,7 @@ This extension makes outbound web connections **only to the base URL configured 
 | --- | --- | --- |
 | `GET {baseUrl}/v1/models` | Before every model-list or enhance call | Reachability probe. Only transport failures (connection refused, DNS) count as unreachable; no response within 3 seconds counts as reachable and the real call proceeds under `timeoutSeconds`. Results are cached (10s reachable, 30s unreachable). |
 | `GET {baseUrl}/v1/models` | When the settings modal opens or refreshes the model list | Model discovery for the model dropdown. Carries the API key, if one is set. |
-| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt, the user's prompt text, and — only if `sendSelectedImage` is enabled — the currently selected Generate-tab image as base64. |
+| `POST {baseUrl}/v1/chat/completions` | When the user clicks Enhance | The enhance call. Carries the API key, if one is set. Sends the configured system prompt and the prompt, plus the enabled context: Prompt Images, past generations from the [history](#generation-history), and the active model stack. |
 
 The reachability probe never carries the key. No other hosts are ever contacted, and no path other than `/v1/models` and `/v1/chat/completions` is ever requested:
 - Redirects are not followed; a 3xx answer is reported as an error naming its target.
@@ -91,9 +112,29 @@ The reachability probe never carries the key. No other hosts are ever contacted,
 
 There is no telemetry, no update check, and no analytics of any kind.
 
+### The PromptEnhanceRun request
+
+The body holds `prompt` and, while Send Prompt Images or Send Active Model Context is on, `swarmInput`; any other key is rejected with `invalid_request`. `swarmInput` is SwarmUI generation input keyed by the Generate tab's parameter ids, and the server parses it with SwarmUI's own parameter parser:
+
+```json
+{
+  "prompt": "a lighthouse at dusk",
+  "swarmInput": {
+    "promptimages": ["data:image/png;base64,…", "inputs/2026-09-29/ref.png"],
+    "model": "sdxl/base",
+    "loras": ["style-a"],
+    "loraweights": "0.8",
+    "loratencweights": "0.5",
+    "lorasectionconfinement": "0"
+  }
+}
+```
+
+`promptimages` is accepted only while Send Prompt Images is on; the model keys only while Send Active Model Context is on.
+
 ## Settings
 
-Settings are stored per-user through SwarmUI's user-data store. **Reset** in the settings modal restores every key to its default. The eight keys and their defaults:
+Settings are stored per-user through SwarmUI's user-data store. **Reset** in the settings modal restores every key to its default. The ten keys and their defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -103,7 +144,9 @@ Settings are stored per-user through SwarmUI's user-data store. **Reset** in the
 | `systemPrompt` | `You are a prompt enhancer for text-to-image generation. Rewrite the user's prompt into a single, richly detailed image-generation prompt. Reply with only the enhanced prompt, no preamble or explanation.` | System message sent with every enhance call. |
 | `temperature` | `0.7` | Sampling temperature, 0 to 2. |
 | `maxTokens` | `1024` | `max_tokens` for the chat completion. |
-| `sendSelectedImage` | `false` | When enabled, attaches the currently selected Generate-tab image to the enhance request. Requires a vision-capable model. |
+| `sendPromptImages` | `false` | Sends the Generate tab's Prompt Images, in order. Requires a vision-capable enhancer model. |
+| `pastGenerations` | `0` | Number of your most recent finished generation requests to send from the [history](#generation-history), 0 to 10. Above 0, new requests are recorded. |
+| `sendActiveModelContext` | `false` | Sends the selected base model and active LoRAs with their registry metadata, weights, text-encoder weights, and scopes. |
 | `replaceMode` | `preview` | How the enhanced prompt is applied: `preview`, `append`, or `replace_with_restore`. |
 
 ## API keys
@@ -139,9 +182,9 @@ Two layouts build and test identically; the C# project picks one automatically (
 
 | Path | Contents |
 | --- | --- |
-| `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, and API routes. |
-| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, and the API key registration (`UpstreamApiKey.cs`). Every route carries `[API.APIDescription]`/`[API.APIParameter]` for SwarmUI's API doc generator, and failures return SwarmUI's `{ "error", "error_id" }` envelope with `error_id` from `errorCategories` in the contract. |
-| `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`); every global is `pe`-prefixed or a `promptEnhance*` singleton. |
+| `PromptEnhanceExtension.cs` | Entry point: registers the scripts, stylesheet, API routes, and the generation history. |
+| `WebAPI/` | The five API routes, the backend HTTP client, settings storage and validation, the error taxonomy, the API key registration (`UpstreamApiKey.cs`), the SwarmUI input resolver (`SwarmContext.cs`), and the generation history (`GenerationHistory.cs`). Every route carries `[API.APIDescription]`/`[API.APIParameter]` for SwarmUI's API doc generator, and failures return SwarmUI's `{ "error", "error_id" }` envelope with `error_id` from `errorCategories` in the contract. |
+| `Frontend/*.ts` | The browser code, authoritative. Classic global scripts built on SwarmUI's own helpers (`util.js`, `site.js`, `params.js`). Globals one file assigns for another are declared in `Frontend/globals.d.ts`; every global is `pe`-prefixed, `PE_`-prefixed, a `PromptEnhance*` class, or a `promptEnhance*` singleton. |
 | `Assets/*.js` | The exact `tsc` output of `Frontend/`, committed because SwarmUI serves it. Never edit by hand; `npm run build:frontend` regenerates it. |
 | `Assets/promptenhance.css` | Extension styles, using only color tokens every SwarmUI theme defines. |
 | `contracts/pe-contract.json` | Routes, setting defaults, bounds, and apply modes, shared by the C# and TypeScript sides; parity tests pin both to it. |

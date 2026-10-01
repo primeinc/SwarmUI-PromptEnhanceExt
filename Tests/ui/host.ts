@@ -5,14 +5,16 @@ export async function shootPromptRegion(page: Page, name: string): Promise<void>
     await expect(page.locator('#alt_prompt_region')).toHaveScreenshot(`${name}.png`);
 }
 
+const { PE_FAKE_BACKEND_PORT, PE_FAKE_KEYED_BACKEND_PORT, PE_FAKE_BACKEND_KEY } = process.env;
+
 /** The OpenAI-compatible fake backend started by playwright.config.ts. */
-export const fakeBackendUrl = `http://127.0.0.1:${process.env.PE_FAKE_BACKEND_PORT ?? 7897}`;
+export const fakeBackendUrl = `http://127.0.0.1:${PE_FAKE_BACKEND_PORT ?? 7897}`;
 
 /** The fake backend that answers only `Authorization: Bearer <fakeBackendKey>`. */
-export const fakeKeyedBackendUrl = `http://127.0.0.1:${process.env.PE_FAKE_KEYED_BACKEND_PORT ?? 7896}`;
+export const fakeKeyedBackendUrl = `http://127.0.0.1:${PE_FAKE_KEYED_BACKEND_PORT ?? 7896}`;
 
 /** The key the keyed fake backend requires (fake-backend.mts default). */
-export const fakeBackendKey = process.env.PE_FAKE_BACKEND_KEY ?? 'pe-test-key';
+export const fakeBackendKey = PE_FAKE_BACKEND_KEY ?? 'pe-test-key';
 
 /** Calls one SwarmUI API route from inside the page, through the host's own session-aware transport. */
 export async function callRoute(page: Page, route: string, payload: object): Promise<unknown> {

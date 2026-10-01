@@ -1,13 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const { PE_UI_PORT, PE_FAKE_BACKEND_PORT, PE_FAKE_KEYED_BACKEND_PORT } = process.env;
+
 /** Port the vendored host listens on for browser runs; distinct from `vendor-ci-test` (7899). */
-const port = Number(process.env.PE_UI_PORT ?? 7898);
+const port = Number(PE_UI_PORT ?? 7898);
 
 /** Port of the fake OpenAI-compatible backend (fake-backend.mts) the extension is pointed at. */
-const fakeBackendPort = Number(process.env.PE_FAKE_BACKEND_PORT ?? 7897);
+const fakeBackendPort = Number(PE_FAKE_BACKEND_PORT ?? 7897);
 
 /** Port of the fake backend that requires `Authorization: Bearer <PE_FAKE_BACKEND_KEY>`. */
-const fakeKeyedBackendPort = Number(process.env.PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
+const fakeKeyedBackendPort = Number(PE_FAKE_KEYED_BACKEND_PORT ?? 7896);
 
 /** True when every port is the one the README screenshots were taken with. */
 const usesDefaultPorts = port === 7898 && fakeBackendPort === 7897 && fakeKeyedBackendPort === 7896;
